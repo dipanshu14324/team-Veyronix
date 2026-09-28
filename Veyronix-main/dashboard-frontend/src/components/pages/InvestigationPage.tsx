@@ -749,9 +749,7 @@ export const InvestigationPage: React.FC<
     onSelectCase(caseId);
   };
 
-  const activeCase = useMemo<
-    DisplayCase | undefined
-  >(
+  const activeCase = useMemo<DisplayCase | undefined>(
     () =>
       displayCases.find(
         (c) =>
@@ -849,22 +847,23 @@ export const InvestigationPage: React.FC<
     );
   }, [analysis]);
 
-  const evidenceList = useMemo<
-    string[]
-  >(() => {
-    if (
-      !analysis ||
-      !Array.isArray(
-        analysis.evidence,
-      )
-    ) {
-      return [];
-    }
+  const evidenceList = useMemo<string[]>(
+    () => {
+      if (
+        !analysis ||
+        !Array.isArray(
+          analysis.evidence,
+        )
+      ) {
+        return [];
+      }
 
-    return analysis.evidence.map(
-      (item) => String(item),
-    );
-  }, [analysis]);
+      return analysis.evidence.map(
+        (item) => String(item),
+      );
+    },
+    [analysis],
+  );
 
   const liveSource =
     analysis?.source ??
@@ -1159,29 +1158,25 @@ export const InvestigationPage: React.FC<
       ) : (
 
         /*
-         * IMPORTANT:
-         * Fixed 12-column layout.
+         * RESPONSIVE INVESTIGATION LAYOUT
          *
-         * This intentionally DOES NOT use:
-         * grid-cols-1
-         * md:grid-cols-12
-         * lg:grid-cols-12
-         * xl:grid-cols-12
+         * DESKTOP:
+         *   CASE LIST  = 4 columns
+         *   ACTIVE CASE = 8 columns
          *
-         * Therefore the two main panels stay side-by-side
-         * on desktop, laptop, tablet and mobile.
-         *
-         * LEFT  = 4 columns
-         * RIGHT = 8 columns
+         * MOBILE:
+         *   CASE LIST = full width
+         *   cards = horizontal scroll
+         *   ACTIVE CASE = full width below cards
          */
 
-        <div className="grid grid-cols-12 gap-5 min-w-[720px]">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
 
           {/* ================================================== */}
           {/* CASE LIST */}
           {/* ================================================== */}
 
-          <div className="col-span-4 space-y-3">
+          <div className="lg:col-span-4 space-y-3 min-w-0">
 
             <TypewriterHeading
               as="h2"
@@ -1192,7 +1187,12 @@ export const InvestigationPage: React.FC<
               speed={25}
             />
 
-            <div className="space-y-3">
+            {/* MOBILE:
+                Horizontal scrolling docket.
+                DESKTOP:
+                Normal vertical list.
+            */}
+            <div className="flex gap-3 overflow-x-auto pb-2 -mx-1 px-1 snap-x snap-mandatory lg:block lg:overflow-visible lg:pb-0 lg:mx-0 lg:px-0 lg:snap-none">
 
               {displayCases.map(
                 (currentCase) => {
@@ -1227,7 +1227,7 @@ export const InvestigationPage: React.FC<
                           currentCase.caseId,
                         )
                       }
-                      className={`w-full text-left p-4 rounded-2xl border transition-all ${
+                      className={`w-[300px] shrink-0 snap-start lg:w-full lg:shrink lg:snap-none text-left p-4 rounded-2xl border transition-all ${
                         isSelected
                           ? 'bg-[#0e163d] border-cyan-400 shadow-[0_0_20px_rgba(6,182,212,0.35)] ring-1 ring-cyan-400/40'
                           : 'bg-[#070b1e] border-[#1b2554] hover:bg-[#0c1232] hover:border-cyan-500/40'
@@ -1322,7 +1322,7 @@ export const InvestigationPage: React.FC<
           {/* ACTIVE CASE */}
           {/* ================================================== */}
 
-          <div className="col-span-8 bg-[#080d25]/95 border border-[#1e2a60] rounded-2xl p-4 sm:p-5 shadow-2xl space-y-5">
+          <div className="lg:col-span-8 min-w-0 w-full bg-[#080d25]/95 border border-[#1e2a60] rounded-2xl p-4 sm:p-5 shadow-2xl space-y-5">
 
             <div className="pb-4 border-b border-[#1b2554]">
 
@@ -1332,7 +1332,7 @@ export const InvestigationPage: React.FC<
 
                   <div className="flex flex-wrap items-center gap-2 mb-2">
 
-                    <span className="text-sm font-bold font-mono text-cyan-400">
+                    <span className="text-sm font-bold font-mono text-cyan-400 break-all">
                       {activeCase.caseId}
                     </span>
 
@@ -1347,7 +1347,7 @@ export const InvestigationPage: React.FC<
 
                   </div>
 
-                  <h2 className="text-xl sm:text-2xl font-bold font-heading text-white leading-tight">
+                  <h2 className="text-xl sm:text-2xl font-bold font-heading text-white leading-tight break-words">
                     {activeEvent?.name ??
                       activeCase.eventName}
                   </h2>
@@ -1355,7 +1355,7 @@ export const InvestigationPage: React.FC<
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2 text-xs text-slate-400">
 
                     <span className="flex items-center gap-1.5">
-                      <MapPin className="w-3.5 h-3.5 text-cyan-400" />
+                      <MapPin className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
 
                       {activeEvent
                         ? `${formatNumber(
@@ -1420,19 +1420,21 @@ export const InvestigationPage: React.FC<
 
             {analysisLoading && (
               <div className="rounded-xl bg-cyan-500/5 border border-cyan-500/30 p-3 flex items-center gap-2 text-xs text-cyan-300">
-                <RefreshCw className="w-4 h-4 animate-spin" />
-                Running VEYRONIX LightGBM event analysis...
+                <RefreshCw className="w-4 h-4 animate-spin shrink-0" />
+                <span>
+                  Running VEYRONIX LightGBM event analysis...
+                </span>
               </div>
             )}
 
             {analysisError && (
               <div className="rounded-xl bg-red-500/5 border border-red-500/30 p-3 flex items-start gap-2 text-xs text-red-300">
                 <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-                <div>
+                <div className="min-w-0">
                   <div className="font-bold">
                     ML ANALYSIS UNAVAILABLE
                   </div>
-                  <div className="mt-1 text-red-300/80">
+                  <div className="mt-1 text-red-300/80 break-words">
                     {analysisError}
                   </div>
                 </div>
@@ -1441,8 +1443,10 @@ export const InvestigationPage: React.FC<
 
             {analysis && (
               <div className="rounded-xl bg-emerald-500/5 border border-emerald-500/20 p-3 flex items-center gap-2 text-xs text-emerald-300">
-                <CheckCircle2 className="w-4 h-4" />
-                LIVE LightGBM prediction loaded from VEYRONIX API.
+                <CheckCircle2 className="w-4 h-4 shrink-0" />
+                <span>
+                  LIVE LightGBM prediction loaded from VEYRONIX API.
+                </span>
               </div>
             )}
 
@@ -1455,7 +1459,7 @@ export const InvestigationPage: React.FC<
 
                 <section>
 
-                  <div className="flex items-center justify-between mb-2.5">
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-2.5">
 
                     <TypewriterHeading
                       as="h3"
@@ -1469,7 +1473,7 @@ export const InvestigationPage: React.FC<
                     <button
                       type="button"
                       onClick={openMap}
-                      className="px-2.5 py-1 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 text-[10px] font-bold flex items-center gap-1.5 hover:bg-cyan-500 hover:text-slate-950 transition-colors"
+                      className="self-start sm:self-auto px-2.5 py-1 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 text-[10px] font-bold flex items-center gap-1.5 hover:bg-cyan-500 hover:text-slate-950 transition-colors"
                     >
                       <ExternalLink className="w-3 h-3" />
                       OPEN COORDINATE
@@ -1589,7 +1593,7 @@ export const InvestigationPage: React.FC<
 
                   <div className="flex items-center gap-2 mb-2.5">
 
-                    <BrainCircuit className="w-4 h-4 text-purple-400" />
+                    <BrainCircuit className="w-4 h-4 text-purple-400 shrink-0" />
 
                     <h3 className="text-xs font-bold uppercase text-purple-300 font-heading">
                       ML SOURCE ATTRIBUTION
@@ -1626,19 +1630,19 @@ export const InvestigationPage: React.FC<
                             }
                           >
 
-                            <div className="flex items-center justify-between text-[11px] mb-1">
+                            <div className="flex items-center justify-between gap-3 text-[11px] mb-1">
 
                               <span
-                                className={
+                                className={`min-w-0 ${
                                   isPredicted
                                     ? 'text-white font-bold'
                                     : 'text-slate-400'
-                                }
+                                }`}
                               >
                                 {source.label}
                               </span>
 
-                              <span className="font-mono text-slate-300">
+                              <span className="font-mono text-slate-300 shrink-0">
                                 {analysis
                                   ? `${Math.round(
                                       width,
@@ -1696,7 +1700,7 @@ export const InvestigationPage: React.FC<
 
                   <div className="flex items-center gap-2 mb-2.5">
 
-                    <LocateFixed className="w-4 h-4 text-emerald-400" />
+                    <LocateFixed className="w-4 h-4 text-emerald-400 shrink-0" />
 
                     <h3 className="text-xs font-bold uppercase text-emerald-300 font-heading">
                       HOTSPOT LOCATION CONTEXT
@@ -1712,7 +1716,7 @@ export const InvestigationPage: React.FC<
                         FIRMS event coordinate
                       </div>
 
-                      <div className="mt-2 text-lg font-mono font-bold text-white">
+                      <div className="mt-2 text-lg font-mono font-bold text-white break-all">
 
                         {formatNumber(
                           activeEvent.lat,
@@ -1730,7 +1734,7 @@ export const InvestigationPage: React.FC<
 
                       </div>
 
-                      <p className="text-[10px] text-slate-500 mt-2">
+                      <p className="text-[10px] text-slate-500 mt-2 leading-relaxed">
                         Satellite hotspot coordinate; not a building-level exact fire boundary.
                       </p>
 
@@ -1742,7 +1746,7 @@ export const InvestigationPage: React.FC<
                         Spatial context
                       </div>
 
-                      <div className="mt-2 text-sm font-bold text-white">
+                      <div className="mt-2 text-sm font-bold text-white break-words">
                         {activeEvent.spatialContext
                           ?.landUseClassification ??
                           'Context unavailable'}
@@ -1778,7 +1782,7 @@ export const InvestigationPage: React.FC<
                       {activeEvent
                         .spatialContext
                         ?.facilityName && (
-                        <div className="mt-2 text-[10px] text-cyan-300">
+                        <div className="mt-2 text-[10px] text-cyan-300 break-words">
                           Nearby context:{' '}
                           {
                             activeEvent
@@ -1800,7 +1804,7 @@ export const InvestigationPage: React.FC<
 
                 <section>
 
-                  <div className="flex items-center justify-between mb-2.5">
+                  <div className="flex items-center justify-between gap-3 mb-2.5">
 
                     <TypewriterHeading
                       as="h3"
@@ -1811,7 +1815,7 @@ export const InvestigationPage: React.FC<
                       speed={25}
                     />
 
-                    <span className="text-[10px] text-slate-500">
+                    <span className="text-[10px] text-slate-500 shrink-0">
                       {evidenceList.length}{' '}
                       recorded items
                     </span>
@@ -1832,7 +1836,7 @@ export const InvestigationPage: React.FC<
                           >
                             <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
 
-                            <span>
+                            <span className="break-words">
                               {String(
                                 evidence,
                               )}
@@ -2017,7 +2021,7 @@ export const InvestigationPage: React.FC<
 
                         </div>
 
-                        <p className="text-xs text-slate-300 leading-relaxed mt-1.5">
+                        <p className="text-xs text-slate-300 leading-relaxed mt-1.5 break-words">
                           {note.text ?? ''}
                         </p>
 
@@ -2128,16 +2132,18 @@ function MetricCard({
   };
 
   return (
-    <div className="rounded-xl bg-[#070b1e] border border-[#1b2554] p-3">
+    <div className="rounded-xl bg-[#070b1e] border border-[#1b2554] p-3 min-w-0">
 
       <div
         className={`flex items-center gap-1.5 text-[10px] uppercase font-heading font-bold ${toneClasses[tone]}`}
       >
         {icon}
-        {label}
+        <span className="truncate">
+          {label}
+        </span>
       </div>
 
-      <div className="text-base sm:text-lg font-bold font-mono text-white mt-1.5">
+      <div className="text-base sm:text-lg font-bold font-mono text-white mt-1.5 break-words">
         {value}
       </div>
 
@@ -2155,13 +2161,13 @@ function InfoMetric({
   value: string;
 }) {
   return (
-    <div className="rounded-xl bg-[#070b1e] border border-[#1b2554] px-3 py-2.5">
+    <div className="rounded-xl bg-[#070b1e] border border-[#1b2554] px-3 py-2.5 min-w-0">
 
       <div className="text-[9px] uppercase text-slate-500 font-heading font-bold">
         {label}
       </div>
 
-      <div className="text-[11px] text-slate-200 font-mono font-semibold mt-1 truncate">
+      <div className="text-[11px] text-slate-200 font-mono font-semibold mt-1 break-words">
         {value}
       </div>
 
