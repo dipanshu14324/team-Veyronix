@@ -89,3 +89,8 @@ data/verification/
 data/phase1_fire_data/
 # Local notebook datasets
 notebooks/data/
+
+# Node / Vite frontend
+node_modules/
+dist/
+
