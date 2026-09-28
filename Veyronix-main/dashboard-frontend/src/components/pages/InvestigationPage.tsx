@@ -1244,13 +1244,12 @@ export const InvestigationPage: React.FC<
 
       ) : (
 
-        <div className="grid grid-cols-1 xl:grid-cols-12 gap-5">
-
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
           {/* ================================================== */}
           {/* CASE LIST */}
           {/* ================================================== */}
 
-          <div className="xl:col-span-4 space-y-3">
+          <div className="lg:col-span-4 space-y-3">
 
             <TypewriterHeading
               as="h2"
@@ -1391,9 +1390,7 @@ export const InvestigationPage: React.FC<
           {/* ACTIVE CASE */}
           {/* ================================================== */}
 
-          <div className="xl:col-span-8 bg-[#080d25]/95 border border-[#1e2a60] rounded-2xl p-4 sm:p-5 shadow-2xl space-y-5">
-
-            {/* CASE IDENTITY */}
+         <div className="lg:col-span-8 bg-[#080d25]/95 border border-[#1e2a60] rounded-2xl p-4 sm:p-5 shadow-2xl space-y-5">
 
             <div className="pb-4 border-b border-[#1b2554]">
 
