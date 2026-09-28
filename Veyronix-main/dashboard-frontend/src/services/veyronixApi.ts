@@ -47,6 +47,10 @@ function clamp(
   );
 }
 
+/* =========================================================
+   PROBABILITIES
+   ========================================================= */
+
 function getProbabilities(
   raw: Record<string, unknown>,
 ) {
@@ -79,6 +83,20 @@ function getProbabilities(
   };
 }
 
+/* =========================================================
+   PRIORITY
+   =========================================================
+
+   Backend api/main.py is the source of truth.
+
+   Backend thresholds:
+
+   85+ = CRITICAL
+   70+ = HIGH
+   50+ = MEDIUM
+   <50 = LOW
+   ========================================================= */
+
 function priorityFromScore(
   score: number,
 ): ThermalEvent['investigationPriority'] {
@@ -97,28 +115,79 @@ function priorityFromScore(
   return 'LOW';
 }
 
+/* =========================================================
+   NORMALIZE BACKEND PRIORITY
+   ========================================================= */
+
+function normalizePriority(
+  value: unknown,
+): ThermalEvent['investigationPriority'] | null {
+  if (
+    typeof value !== 'string'
+  ) {
+    return null;
+  }
+
+  const priority =
+    value
+      .trim()
+      .toUpperCase();
+
+  if (
+    priority === 'CRITICAL' ||
+    priority === 'HIGH' ||
+    priority === 'MEDIUM' ||
+    priority === 'LOW'
+  ) {
+    return priority;
+  }
+
+  return null;
+}
+
+/* =========================================================
+   ABNORMALITY
+   ========================================================= */
+
 function abnormalityFromEvent(
   raw: Record<string, unknown>,
 ): ThermalEvent['abnormality'] {
-  const anomaly = Boolean(
+  const anomaly =
     raw.is_anomaly ??
     raw.anomaly ??
-    false,
-  );
+    false;
 
-  return anomaly
+  const isAnomaly =
+    anomaly === true ||
+    anomaly === 'true' ||
+    anomaly === 1 ||
+    anomaly === '1';
+
+  return isAnomaly
     ? 'HIGH'
     : 'LOW';
 }
 
+/* =========================================================
+   MAP RAW API EVENT → FRONTEND EVENT
+   ========================================================= */
+
 function mapEvent(
   raw: Record<string, unknown>,
 ): ThermalEvent {
+  /* -------------------------------------------------------
+     EVENT ID
+     ------------------------------------------------------- */
+
   const id = String(
     raw.event_id ??
     raw.id ??
     '',
   );
+
+  /* -------------------------------------------------------
+     LOCATION
+     ------------------------------------------------------- */
 
   const lat = num(
     raw.latitude ??
@@ -130,22 +199,101 @@ function mapEvent(
     raw.lng,
   );
 
+  /* -------------------------------------------------------
+     SOURCE
+     ------------------------------------------------------- */
+
   const source = str(
     raw.predicted_source ??
+    raw.predictedSource ??
     raw.source,
     'Uncertain',
   );
 
+  /* -------------------------------------------------------
+     CONFIDENCE
+     ------------------------------------------------------- */
+
   const confidence = clamp(
-    num(raw.confidence),
+    num(
+      raw.confidence,
+      0,
+    ),
     0,
     1,
   );
 
-  const priorityScore =
-    Math.round(
-      confidence * 100,
+  /* =======================================================
+     PRIORITY SCORE
+
+     IMPORTANT:
+
+     Backend gives:
+
+       priority_score
+       priorityScore
+
+     We ALWAYS prefer backend score.
+
+     Only if backend score is completely missing do we
+     fallback to confidence * 100.
+     ======================================================= */
+
+  const rawPriorityScore =
+    raw.priority_score ??
+    raw.priorityScore;
+
+  const parsedPriorityScore =
+    Number(rawPriorityScore);
+
+  const hasBackendPriorityScore =
+    Number.isFinite(
+      parsedPriorityScore,
     );
+
+  const priorityScore =
+    hasBackendPriorityScore
+      ? clamp(
+          Math.round(
+            parsedPriorityScore,
+          ),
+          0,
+          100,
+        )
+      : Math.round(
+          confidence * 100,
+        );
+
+  /* =======================================================
+     PRIORITY
+
+     IMPORTANT:
+
+     Backend sends:
+
+       priority
+       investigationPriority
+
+     We prefer those values.
+
+     If they are missing, calculate from priorityScore.
+     ======================================================= */
+
+  const backendPriority =
+    normalizePriority(
+      raw.priority ??
+      raw.investigationPriority,
+    );
+
+  const investigationPriority =
+    backendPriority ??
+    priorityFromScore(
+      priorityScore,
+    );
+
+  /* -------------------------------------------------------
+     EVENT FEATURES
+     ------------------------------------------------------- */
 
   const peakFrp = num(
     raw.peak_frp ??
@@ -160,22 +308,42 @@ function mapEvent(
     raw.observation_count,
   );
 
-  const isAnomaly = Boolean(
+  /* -------------------------------------------------------
+     ANOMALY
+     ------------------------------------------------------- */
+
+  const anomalyValue =
     raw.is_anomaly ??
-    false,
-  );
+    raw.anomaly ??
+    false;
+
+  const isAnomaly =
+    anomalyValue === true ||
+    anomalyValue === 'true' ||
+    anomalyValue === 1 ||
+    anomalyValue === '1';
 
   const anomalyScore = clamp(
-    num(raw.anomaly_score) * 100,
+    num(
+      raw.anomaly_score,
+    ) * 100,
     0,
     100,
   );
+
+  /* -------------------------------------------------------
+     DATE
+     ------------------------------------------------------- */
 
   const eventDate = str(
     raw.event_date ??
     raw.start_time,
     'Unknown',
   );
+
+  /* =======================================================
+     FINAL FRONTEND EVENT
+     ======================================================= */
 
   return {
     id,
@@ -193,9 +361,11 @@ function mapEvent(
 
     lng,
 
-    mapX: 50,
+    mapX:
+      50,
 
-    mapY: 50,
+    mapY:
+      50,
 
     frpMw:
       peakFrp,
@@ -209,13 +379,16 @@ function mapEvent(
     detectionTimeIst:
       eventDate,
 
-    sensor: str(
-      raw.satellite,
-      'NASA FIRMS',
-    ),
+    sensor:
+      str(
+        raw.satellite,
+        'NASA FIRMS',
+      ),
 
     abnormality:
-      abnormalityFromEvent(raw),
+      abnormalityFromEvent(
+        raw,
+      ),
 
     abnormalityScore:
       anomalyScore,
@@ -223,10 +396,21 @@ function mapEvent(
     likelySource:
       source,
 
-    investigationPriority:
-      priorityFromScore(
-        priorityScore,
-      ),
+    /* =====================================================
+       PRIORITY
+
+       These values now come directly from backend whenever
+       available.
+
+       Example:
+
+       priority_score: 76
+       priority: HIGH
+
+       → marker should be HIGH immediately.
+       ===================================================== */
+
+    investigationPriority,
 
     priorityScore,
 
@@ -239,6 +423,10 @@ function mapEvent(
       source === 'Uncertain'
         ? 'Evidence insufficient for reliable attribution.'
         : undefined,
+
+    /* =====================================================
+       EVIDENCE
+       ===================================================== */
 
     evidence: [
       `NASA FIRMS thermal event detected at ${lat.toFixed(4)}, ${lng.toFixed(4)}`,
@@ -254,21 +442,42 @@ function mapEvent(
       source === 'Uncertain'
         ? 'Source attribution requires additional evidence.'
         : `VEYRONIX ML source prediction: ${source}`,
+
+      `Investigation priority: ${investigationPriority}`,
+
+      `Priority score: ${priorityScore}/100`,
     ],
 
+    /* =====================================================
+       SPATIAL CONTEXT
+       ===================================================== */
+
     spatialContext: {
-      distanceKm: 0,
+      distanceKm:
+        0,
 
-      bufferRadiusKm: 0.375,
+      bufferRadiusKm:
+        0.375,
 
-      nearbyFacilitiesCount: 0,
+      nearbyFacilitiesCount:
+        0,
 
       landUseClassification:
         'Not yet matched',
     },
 
+    /* =====================================================
+       SOURCE PROBABILITIES
+       ===================================================== */
+
     sourceProbabilities:
-      getProbabilities(raw),
+      getProbabilities(
+        raw,
+      ),
+
+    /* =====================================================
+       CONTEXT CARDS
+       ===================================================== */
 
     contextCards: {
       localHistory: {
@@ -357,7 +566,9 @@ export async function fetchVeyronixEvents(
       VeyronixEventsResponse;
 
   if (
-    !Array.isArray(data.events)
+    !Array.isArray(
+      data.events,
+    )
   ) {
     throw new Error(
       'VEYRONIX API returned an invalid events response.',
@@ -391,7 +602,9 @@ export async function fetchVeyronixEventById(
     );
 
   if (!response.ok) {
-    if (response.status === 404) {
+    if (
+      response.status === 404
+    ) {
       throw new Error(
         `Event ${cleanEventId} was not found in the VEYRONIX corpus.`,
       );
@@ -425,7 +638,7 @@ export async function fetchVeyronixEventById(
    ========================================================= */
 
 export async function fetchVeyronixAnalysis(
-  eventId:number | string,
+  eventId: number | string,
 ): Promise<AnalysisResponse> {
   const response =
     await fetch(
@@ -454,17 +667,19 @@ export async function predictVeyronixEvent(
     await fetch(
       `${API_BASE_URL}/predict-event`,
       {
-        method: 'POST',
+        method:
+          'POST',
 
         headers: {
           'Content-Type':
             'application/json',
         },
 
-        body: JSON.stringify({
-          event_id:
-            Number(eventId),
-        }),
+        body:
+          JSON.stringify({
+            event_id:
+              Number(eventId),
+          }),
       },
     );
 

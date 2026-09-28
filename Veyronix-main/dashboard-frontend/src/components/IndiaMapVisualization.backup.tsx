@@ -73,6 +73,12 @@ const INDIA_DEFAULT_ZOOM = 5;
  * ============================================================
  * NASA FIRE LAYER
  * ============================================================
+ *
+ * NASA GIBS VIIRS SNPP:
+ *
+ * VIIRS_SNPP_Thermal_Anomalies_375m_All
+ *
+ * This is the satellite thermal anomaly layer.
  */
 
 const NASA_FIRE_LAYER =
@@ -93,6 +99,9 @@ const getDateOnly = (
 
   const text = String(value);
 
+  /*
+   * Already YYYY-MM-DD.
+   */
   const directMatch =
     text.match(
       /^(\d{4}-\d{2}-\d{2})/,
@@ -102,6 +111,9 @@ const getDateOnly = (
     return directMatch[1];
   }
 
+  /*
+   * Try normal Date parsing.
+   */
   const parsed =
     new Date(text);
 
@@ -252,7 +264,7 @@ export const IndiaMapVisualization: React.FC<
 
   /*
    * ============================================================
-   * UPDATE FIRE DATE
+   * UPDATE FIRE DATE WHEN SELECTED EVENT CHANGES
    * ============================================================
    */
 
@@ -286,6 +298,12 @@ export const IndiaMapVisualization: React.FC<
       maxNativeZoom: number;
     }
   > = {
+    /*
+     * ========================================================
+     * ESRI SATELLITE
+     * ========================================================
+     */
+
     satellite: {
       url:
         'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
@@ -300,6 +318,12 @@ export const IndiaMapVisualization: React.FC<
 
       maxNativeZoom: 19,
     },
+
+    /*
+     * ========================================================
+     * OPENSTREETMAP
+     * ========================================================
+     */
 
     osm_standard: {
       url:
@@ -321,6 +345,16 @@ export const IndiaMapVisualization: React.FC<
 
       maxNativeZoom: 19,
     },
+
+    /*
+     * ========================================================
+     * DARK BASE FOR FIRE HEAT
+     * ========================================================
+     *
+     * Dark Esri basemap is used underneath NASA VIIRS.
+     *
+     * NASA thermal anomalies are added separately above it.
+     */
 
     fire_base: {
       url:
@@ -357,8 +391,28 @@ export const IndiaMapVisualization: React.FC<
 
   /*
    * ============================================================
+   * PRIORITY STYLE
+   * ============================================================
+   */
+
+  /*
+   * ============================================================
    * NORMALIZE EVENT PRIORITY
    * ============================================================
+   *
+   * Different API/data versions may use:
+   *   investigationPriority
+   *   priority
+   *   priorityLevel
+   *   severity
+   *
+   * We normalize all of them before deciding the marker color.
+   *
+   * COLOR RULE:
+   *   CRITICAL -> RED
+   *   HIGH     -> RED-ORANGE
+   *   MEDIUM   -> ORANGE
+   *   LOW      -> GREEN
    */
 
   const normalizePriority = (
@@ -366,6 +420,11 @@ export const IndiaMapVisualization: React.FC<
   ): PriorityLevel => {
     const e = event as any;
 
+    /*
+     * Read priority from all common API/data shapes.
+     * This is intentionally done from the ORIGINAL event object,
+     * so marker colors are available before the user clicks a marker.
+     */
     const candidates = [
       e.investigationPriority,
       e.investigationLevel,
@@ -407,37 +466,21 @@ export const IndiaMapVisualization: React.FC<
       e.analysis?.severity,
     ];
 
-    /*
-     * TEXT PRIORITY
-     */
-
+    /* Text priority: HIGH / MEDIUM / LOW / CRITICAL etc. */
     for (const value of candidates) {
-      if (
-        value === null ||
-        value === undefined ||
-        value === ''
-      ) {
+      if (value === null || value === undefined || value === '') {
         continue;
       }
 
-      if (
-        typeof value === 'object'
-      ) {
+      if (typeof value === 'object') {
         continue;
       }
 
-      const normalized =
-        String(value)
-          .trim()
-          .toUpperCase()
-          .replace(
-            /[-_]+/g,
-            ' ',
-          )
-          .replace(
-            /\s+/g,
-            ' ',
-          );
+      const normalized = String(value)
+        .trim()
+        .toUpperCase()
+        .replace(/[-_]+/g, ' ')
+        .replace(/\s+/g, ' ');
 
       if (
         normalized === 'CRITICAL' ||
@@ -475,9 +518,9 @@ export const IndiaMapVisualization: React.FC<
     }
 
     /*
-     * NUMERIC PRIORITY
+     * Numeric priority/risk score fallback.
+     * Supports 0-1, 0-100, 1-10 and 1-4 style APIs.
      */
-
     const numericCandidates = [
       e.priorityScore,
       e.priority_score,
@@ -493,123 +536,45 @@ export const IndiaMapVisualization: React.FC<
       e.ml_score,
     ];
 
-    for (
-      const value of numericCandidates
-    ) {
-      const score =
-        Number(value);
+    for (const value of numericCandidates) {
+      const score = Number(value);
 
-      if (
-        !Number.isFinite(score)
-      ) {
+      if (!Number.isFinite(score)) {
         continue;
       }
 
-      if (
-        score >= 0 &&
-        score <= 1
-      ) {
-        if (
-          score >= 0.80
-        ) {
-          return 'CRITICAL';
-        }
-
-        if (
-          score >= 0.60
-        ) {
-          return 'HIGH';
-        }
-
-        if (
-          score >= 0.30
-        ) {
-          return 'MEDIUM';
-        }
-
+      if (score >= 0 && score <= 1) {
+        if (score >= 0.80) return 'CRITICAL';
+        if (score >= 0.60) return 'HIGH';
+        if (score >= 0.30) return 'MEDIUM';
         return 'LOW';
       }
 
-      if (
-        score >= 0 &&
-        score <= 100
-      ) {
-        if (
-          score >= 80
-        ) {
-          return 'CRITICAL';
-        }
-
-        if (
-          score >= 60
-        ) {
-          return 'HIGH';
-        }
-
-        if (
-          score >= 30
-        ) {
-          return 'MEDIUM';
-        }
-
+      if (score >= 0 && score <= 100) {
+        if (score >= 80) return 'CRITICAL';
+        if (score >= 60) return 'HIGH';
+        if (score >= 30) return 'MEDIUM';
         return 'LOW';
       }
 
-      if (
-        score >= 1 &&
-        score <= 4
-      ) {
-        if (
-          score >= 4
-        ) {
-          return 'CRITICAL';
-        }
-
-        if (
-          score >= 3
-        ) {
-          return 'HIGH';
-        }
-
-        if (
-          score >= 2
-        ) {
-          return 'MEDIUM';
-        }
-
+      if (score >= 1 && score <= 4) {
+        if (score >= 4) return 'CRITICAL';
+        if (score >= 3) return 'HIGH';
+        if (score >= 2) return 'MEDIUM';
         return 'LOW';
       }
 
-      if (
-        score >= 1 &&
-        score <= 10
-      ) {
-        if (
-          score >= 8
-        ) {
-          return 'CRITICAL';
-        }
-
-        if (
-          score >= 6
-        ) {
-          return 'HIGH';
-        }
-
-        if (
-          score >= 3
-        ) {
-          return 'MEDIUM';
-        }
-
+      if (score >= 1 && score <= 10) {
+        if (score >= 8) return 'CRITICAL';
+        if (score >= 6) return 'HIGH';
+        if (score >= 3) return 'MEDIUM';
         return 'LOW';
       }
     }
 
     /*
-     * NESTED SCORES
+     * Last fallback: inspect nested score objects.
      */
-
     const nestedScores = [
       e.priority?.score,
       e.risk?.score,
@@ -619,72 +584,28 @@ export const IndiaMapVisualization: React.FC<
       e.analysis?.score,
     ];
 
-    for (
-      const value of nestedScores
-    ) {
-      const score =
-        Number(value);
+    for (const value of nestedScores) {
+      const score = Number(value);
 
-      if (
-        !Number.isFinite(score)
-      ) {
-        continue;
-      }
+      if (!Number.isFinite(score)) continue;
 
-      if (
-        score >= 0 &&
-        score <= 1
-      ) {
-        if (
-          score >= 0.80
-        ) {
-          return 'CRITICAL';
-        }
-
-        if (
-          score >= 0.60
-        ) {
-          return 'HIGH';
-        }
-
-        if (
-          score >= 0.30
-        ) {
-          return 'MEDIUM';
-        }
-
+      if (score >= 0 && score <= 1) {
+        if (score >= 0.80) return 'CRITICAL';
+        if (score >= 0.60) return 'HIGH';
+        if (score >= 0.30) return 'MEDIUM';
         return 'LOW';
       }
 
-      if (
-        score >= 0 &&
-        score <= 100
-      ) {
-        if (
-          score >= 80
-        ) {
-          return 'CRITICAL';
-        }
-
-        if (
-          score >= 60
-        ) {
-          return 'HIGH';
-        }
-
-        if (
-          score >= 30
-        ) {
-          return 'MEDIUM';
-        }
-
+      if (score >= 0 && score <= 100) {
+        if (score >= 80) return 'CRITICAL';
+        if (score >= 60) return 'HIGH';
+        if (score >= 30) return 'MEDIUM';
         return 'LOW';
       }
     }
 
     return 'LOW';
   };
-
   /*
    * ============================================================
    * PRIORITY STYLE
@@ -797,57 +718,6 @@ export const IndiaMapVisualization: React.FC<
           ] =>
             item !== null,
         );
-    };
-
-  /*
-   * ============================================================
-   * OPEN SELECTED EVENT IN GOOGLE MAPS
-   * ============================================================
-   */
-
-  const handleOpenGoogleMaps =
-    () => {
-      if (!selectedEvent) {
-        window.alert(
-          'Please select a thermal event first.',
-        );
-
-        return;
-      }
-
-      const lat =
-        Number(
-          selectedEvent.lat,
-        );
-
-      const lng =
-        Number(
-          selectedEvent.lng,
-        );
-
-      if (
-        !Number.isFinite(
-          lat,
-        ) ||
-        !Number.isFinite(
-          lng,
-        )
-      ) {
-        window.alert(
-          'Selected event coordinates are not available.',
-        );
-
-        return;
-      }
-
-      const googleMapsUrl =
-        `https://www.google.com/maps?q=${lat},${lng}`;
-
-      window.open(
-        googleMapsUrl,
-        '_blank',
-        'noopener,noreferrer',
-      );
     };
 
   /*
@@ -983,7 +853,12 @@ export const IndiaMapVisualization: React.FC<
       );
 
     /*
+     * ========================================================
      * INITIAL BASE LAYER
+     * ========================================================
+     *
+     * Fire Heat starts with dark basemap.
+     * Other modes are handled by CHANGE BASE MAP.
      */
 
     const tileSource =
@@ -1016,7 +891,9 @@ export const IndiaMapVisualization: React.FC<
       initialTileLayer;
 
     /*
+     * ========================================================
      * INITIAL NASA FIRE LAYER
+     * ========================================================
      */
 
     if (
@@ -1044,7 +921,9 @@ export const IndiaMapVisualization: React.FC<
     }
 
     /*
+     * ========================================================
      * EVENT LAYERS
+     * ========================================================
      */
 
     eventsLayerRef.current =
@@ -1058,7 +937,9 @@ export const IndiaMapVisualization: React.FC<
       );
 
     /*
+     * ========================================================
      * ZOOM TRACKING
+     * ========================================================
      */
 
     map.on(
@@ -1073,7 +954,9 @@ export const IndiaMapVisualization: React.FC<
     );
 
     /*
+     * ========================================================
      * CURSOR GPS
+     * ========================================================
      */
 
     map.on(
@@ -1125,7 +1008,9 @@ export const IndiaMapVisualization: React.FC<
       map;
 
     /*
+     * ========================================================
      * INITIAL FIT
+     * ========================================================
      */
 
     const coordinates =
@@ -1197,6 +1082,18 @@ export const IndiaMapVisualization: React.FC<
    * ============================================================
    * CHANGE BASE MAP
    * ============================================================
+   *
+   * Satellite
+   * Fire Heat
+   * OSM
+   *
+   * IMPORTANT:
+   *
+   * The event data, ML attribution, markers,
+   * FRP, brightness temperature and locations
+   * do NOT change when switching map mode.
+   *
+   * Only the visual base layer changes.
    */
 
   useEffect(() => {
@@ -1208,7 +1105,9 @@ export const IndiaMapVisualization: React.FC<
     }
 
     /*
-     * REMOVE CURRENT BASE
+     * ========================================================
+     * REMOVE CURRENT BASE LAYER
+     * ========================================================
      */
 
     if (
@@ -1223,7 +1122,9 @@ export const IndiaMapVisualization: React.FC<
     }
 
     /*
-     * REMOVE CURRENT FIRE
+     * ========================================================
+     * REMOVE CURRENT FIRE LAYER
+     * ========================================================
      */
 
     if (
@@ -1238,7 +1139,9 @@ export const IndiaMapVisualization: React.FC<
     }
 
     /*
+     * ========================================================
      * SATELLITE
+     * ========================================================
      */
 
     if (
@@ -1270,7 +1173,9 @@ export const IndiaMapVisualization: React.FC<
     }
 
     /*
+     * ========================================================
      * OSM
+     * ========================================================
      */
 
     if (
@@ -1302,7 +1207,13 @@ export const IndiaMapVisualization: React.FC<
     }
 
     /*
+     * ========================================================
      * FIRE HEAT
+     * ========================================================
+     *
+     * Dark basemap
+     * +
+     * NASA VIIRS 375m thermal anomalies
      */
 
     if (
@@ -1330,6 +1241,10 @@ export const IndiaMapVisualization: React.FC<
           },
         ).addTo(map);
 
+      /*
+       * NASA VIIRS thermal anomaly layer.
+       */
+
       const fireLayer =
         L.tileLayer(
           getNASAFireTileUrl(
@@ -1339,6 +1254,13 @@ export const IndiaMapVisualization: React.FC<
             opacity: 0.88,
 
             maxZoom: 18,
+
+            /*
+             * NASA VIIRS 375m product.
+             *
+             * Level 9 corresponds to the
+             * native GIBS tile level.
+             */
 
             maxNativeZoom: 9,
 
@@ -1453,39 +1375,6 @@ export const IndiaMapVisualization: React.FC<
       return;
     }
 
-    /*
-     * DEBUG PRIORITY DATA
-     */
-
-    console.log(
-      'THERMAL EVENT PRIORITY DATA:\n' +
-        JSON.stringify(
-          events
-            .slice(0, 20)
-            .map((e: any) => ({
-              id: e.id,
-              investigationPriority:
-                e.investigationPriority,
-              priority:
-                e.priority,
-              priorityLevel:
-                e.priorityLevel,
-              severity:
-                e.severity,
-              priorityScore:
-                e.priorityScore,
-              priority_score:
-                e.priority_score,
-              riskScore:
-                e.riskScore,
-              severityScore:
-                e.severityScore,
-            })),
-          null,
-          2,
-        ),
-    );
-
     events.forEach(
       (event) => {
         if (!event) {
@@ -1518,9 +1407,7 @@ export const IndiaMapVisualization: React.FC<
           event.id;
 
         const priority =
-          normalizePriority(
-            event,
-          );
+          normalizePriority(event);
 
         const style =
           getPriorityStyle(
@@ -1528,7 +1415,9 @@ export const IndiaMapVisualization: React.FC<
           );
 
         /*
+         * ======================================================
          * BUFFER
+         * ======================================================
          */
 
         if (
@@ -1599,7 +1488,9 @@ export const IndiaMapVisualization: React.FC<
         }
 
         /*
+         * ======================================================
          * EVENT MARKER
+         * ======================================================
          */
 
         const pulseSize =
@@ -1701,7 +1592,9 @@ export const IndiaMapVisualization: React.FC<
           );
 
         /*
+         * ======================================================
          * POPUP DATA
+         * ======================================================
          */
 
         const frp =
@@ -1739,7 +1632,9 @@ export const IndiaMapVisualization: React.FC<
           );
 
         /*
+         * ======================================================
          * POPUP
+         * ======================================================
          */
 
         const popupHtml = `
@@ -2001,7 +1896,9 @@ export const IndiaMapVisualization: React.FC<
         );
 
         /*
+         * ======================================================
          * MARKER CLICK
+         * ======================================================
          */
 
         eventMarker.on(
@@ -2018,7 +1915,9 @@ export const IndiaMapVisualization: React.FC<
         );
 
         /*
+         * ======================================================
          * POPUP BUTTON
+         * ======================================================
          */
 
         eventMarker.on(
@@ -2550,53 +2449,6 @@ export const IndiaMapVisualization: React.FC<
               </button>
 
             </div>
-
-            {/* =================================================
-                GOOGLE MAPS
-            ================================================= */}
-
-            <button
-              type="button"
-              onClick={
-                handleOpenGoogleMaps
-              }
-              className="
-                px-2.5
-                py-1
-                rounded-lg
-                text-[11px]
-                font-medium
-                flex
-                items-center
-                gap-1.5
-                bg-[#0d1438]
-                border
-                border-[#1e2c69]
-                text-slate-300
-                hover:bg-red-500/20
-                hover:border-red-400/70
-                hover:text-red-300
-                transition-colors
-              "
-              title={
-                selectedEvent
-                  ? 'Open selected event in Google Maps'
-                  : 'Select an event first'
-              }
-            >
-
-              <MapPin
-                className="
-                  w-3.5
-                  h-3.5
-                "
-              />
-
-              <span>
-                Google
-              </span>
-
-            </button>
 
             {/* =================================================
                 EVENTS
@@ -3158,14 +3010,12 @@ export const IndiaMapVisualization: React.FC<
                               selectedEvent,
                             ),
                           ).color,
-
                         backgroundColor:
                           `${getPriorityStyle(
                             normalizePriority(
                               selectedEvent,
                             ),
                           ).color}26`,
-
                         border:
                           `1px solid ${getPriorityStyle(
                             normalizePriority(
@@ -3174,24 +3024,18 @@ export const IndiaMapVisualization: React.FC<
                           ).border}`,
                       }}
                     >
-                      {
-                        getPriorityStyle(
-                          normalizePriority(
-                            selectedEvent,
-                          ),
-                        ).label
-                      }
-
+                      {getPriorityStyle(
+                        normalizePriority(
+                          selectedEvent,
+                        ),
+                      ).label}
                       {' • '}
-
-                      {
-                        typeof selectedEvent.frpMw ===
-                        'number'
-                          ? selectedEvent.frpMw.toFixed(
-                              0,
-                            )
-                          : '0'
-                      }{' '}
+                      {typeof selectedEvent.frpMw ===
+                      'number'
+                        ? selectedEvent.frpMw.toFixed(
+                            0,
+                          )
+                        : '0'}{' '}
                       MW
                     </span>
 
@@ -3327,51 +3171,6 @@ export const IndiaMapVisualization: React.FC<
                   </span>
 
                 </div>
-
-                {/* =================================================
-                    GOOGLE MAPS BUTTON IN EVENT CARD
-                ================================================= */}
-
-                <button
-                  type="button"
-                  onClick={
-                    handleOpenGoogleMaps
-                  }
-                  className="
-                    mt-3
-                    w-full
-                    flex
-                    items-center
-                    justify-center
-                    gap-2
-                    px-3
-                    py-2
-                    rounded-lg
-                    bg-red-500/15
-                    border
-                    border-red-400/60
-                    text-red-300
-                    hover:bg-red-500/25
-                    hover:border-red-400
-                    hover:text-red-200
-                    transition-colors
-                    text-[11px]
-                    font-mono
-                    font-bold
-                  "
-                >
-
-                  <MapPin
-                    className="
-                      w-3.5
-                      h-3.5
-                    "
-                  />
-
-                  Open in Google Maps
-
-                </button>
-
               </div>
             )}
 
