@@ -548,7 +548,7 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
                   font-medium
                 "
               >
-                System Settings
+                System Architecture
               </button>
 
               {/* Logout */}

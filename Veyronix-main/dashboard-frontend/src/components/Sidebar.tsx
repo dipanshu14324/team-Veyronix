@@ -102,7 +102,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
     {
       id: 'system',
-      label: 'System',
+      label: 'System Architecture',
       icon: Settings,
     },
   ];
