@@ -1,0 +1,7342 @@
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import {
+  MapContainer,
+  TileLayer,
+  CircleMarker,
+  Popup,
+  useMap,
+} from "react-leaflet";
+import L from "leaflet";
+import {
+  Maximize2,
+  Minimize2,
+  RotateCcw,
+  Satellite,
+  Flame,
+  Map as MapIcon,
+  Radio,
+  Layers,
+} from "lucide-react";
+
+import "leaflet/dist/leaflet.css";
+
+import type { ThermalEvent, PriorityLevel } from "../types";
+
+// ============================================================
+// TYPES
+// ============================================================
+
+type BaseTileType = "satellite" | "thermal" | "osm_standard";
+
+interface IndiaMapVisualizationProps {
+  events: ThermalEvent[];
+  selectedEvent?: ThermalEvent | null;
+  onSelectEvent?: (event: ThermalEvent) => void;
+  showEvents?: boolean;
+  showBuffers?: boolean;
+  onToggleEvents?: () => void;
+  onToggleBuffers?: () => void;
+  className?: string;
+}
+
+// ============================================================
+// MAP CONSTANTS
+// ============================================================
+
+const INDIA_CENTER: [number, number] = [22.5, 79.0];
+
+const INDIA_ZOOM = 5;
+
+const SATELLITE_URL =
+  "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
+
+const OSM_URL =
+  "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
+
+// NASA GIBS VIIRS 375m thermal anomaly layer.
+// The date is injected dynamically according to the selected event.
+const NASA_GIBS_WMTS =
+  "https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/VIIRS_SNPP_Thermal_Anomalies_375m_All/default/{date}/GoogleMapsCompatible_Level9/{z}/{y}/{x}.png";
+
+// ============================================================
+// HELPERS
+// ============================================================
+
+function safeNumber(value: unknown, fallback = 0): number {
+  const n = Number(value);
+
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function getEventId(event: ThermalEvent): string | number {
+  return (
+    (event as any).eventId ??
+    (event as any).event_id ??
+    (event as any).id ??
+    "unknown"
+  );
+}
+
+function getLatitude(event: ThermalEvent): number {
+  return safeNumber(
+    (event as any).latitude ??
+      (event as any).lat ??
+      (event as any).location?.latitude
+  );
+}
+
+function getLongitude(event: ThermalEvent): number {
+  return safeNumber(
+    (event as any).longitude ??
+      (event as any).lng ??
+      (event as any).lon ??
+      (event as any).location?.longitude
+  );
+}
+
+function getFRP(event: ThermalEvent): number {
+  return safeNumber(
+    (event as any).peakFrp ??
+      (event as any).peak_frp ??
+      (event as any).frp ??
+      (event as any).meanFrp ??
+      (event as any).mean_frp
+  );
+}
+
+function getConfidence(event: ThermalEvent): number {
+  const confidence = safeNumber(
+    (event as any).confidence,
+    0
+  );
+
+  if (confidence > 1) {
+    return Math.min(confidence / 100, 1);
+  }
+
+  return Math.max(0, Math.min(confidence, 1));
+}
+
+function getEventDate(event: ThermalEvent): string | null {
+  const raw =
+    (event as any).eventDate ??
+    (event as any).event_date ??
+    (event as any).startTime ??
+    (event as any).start_time ??
+    (event as any).acq_date ??
+    null;
+
+  if (!raw) {
+    return null;
+  }
+
+  const value = String(raw);
+
+  const match = value.match(/\d{4}-\d{2}-\d{2}/);
+
+  return match ? match[0] : null;
+}
+
+function getPriority(event: ThermalEvent): string {
+  return String(
+    (event as any).investigationPriority ??
+      (event as any).priority ??
+      "Medium"
+  );
+}
+
+
+
+// ============================================================
+// FIRE INTENSITY
+// ============================================================
+
+function getHeatIntensity(event: ThermalEvent): number {
+  const frp = getFRP(event);
+  const confidence = getConfidence(event);
+
+  // FRP contribution.
+  const frpScore =
+    frp > 0 ? Math.min(Math.log10(frp + 1) / 3, 1) : 0;
+
+  // Persistence / observation contribution.
+  const observations = safeNumber(
+    (event as any).observationCount ??
+      (event as any).observation_count,
+    1
+  );
+
+  const persistenceScore = Math.min(observations / 10, 1);
+
+  // Combined fire intensity.
+  return Math.max(
+    0.12,
+    Math.min(
+      1,
+      frpScore * 0.55 +
+        confidence * 0.30 +
+        persistenceScore * 0.15
+    )
+  );
+}
+
+function getHeatRadius(event: ThermalEvent): number {
+  const intensity = getHeatIntensity(event);
+
+  return 10 + intensity * 24;
+}
+
+// ============================================================
+// NASA THERMAL LAYER
+// ============================================================
+
+interface NasaThermalLayerProps {
+  date: string;
+}
+
+function NasaThermalLayer({
+  date,
+}: NasaThermalLayerProps) {
+  const map = useMap();
+  const layerRef = useRef<L.TileLayer | null>(null);
+
+  useEffect(() => {
+    if (!map) {
+      return;
+    }
+
+    if (layerRef.current) {
+      map.removeLayer(layerRef.current);
+      layerRef.current = null;
+    }
+
+    if (!date) {
+      return;
+    }
+
+    const url = NASA_GIBS_WMTS.replace(
+      "{date}",
+      date
+    );
+
+    const layer = L.tileLayer(url, {
+      opacity: 0.88,
+      maxZoom: 9,
+      minZoom: 1,
+      attribution:
+        '&copy; NASA GIBS / VIIRS thermal anomalies',
+      crossOrigin: true,
+    });
+
+    layer.addTo(map);
+
+    layerRef.current = layer;
+
+    return () => {
+      if (layerRef.current) {
+        map.removeLayer(layerRef.current);
+        layerRef.current = null;
+      }
+    };
+  }, [map, date]);
+
+  return null;
+}
+
+// ============================================================
+// MAP RESIZE FIX
+// ============================================================
+
+function MapResizeHandler() {
+  const map = useMap();
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      map.invalidateSize();
+    }, 150);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [map]);
+
+  return null;
+}
+
+// ============================================================
+// MAP CONTROLLER
+// ============================================================
+
+interface MapControllerProps {
+  selectedEvent?: ThermalEvent | null;
+}
+
+function MapController({
+  selectedEvent,
+}: MapControllerProps) {
+  const map = useMap();
+
+  useEffect(() => {
+    if (!selectedEvent) {
+      return;
+    }
+
+    const lat = getLatitude(selectedEvent);
+    const lng = getLongitude(selectedEvent);
+
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      return;
+    }
+
+    map.flyTo(
+      [lat, lng],
+      Math.max(map.getZoom(), 8),
+      {
+        duration: 1,
+      }
+    );
+  }, [selectedEvent, map]);
+
+  return null;
+}
+
+// ============================================================
+// MAIN COMPONENT
+// ============================================================
+
+export default function IndiaMapVisualization({
+  events,
+  selectedEvent,
+  onSelectEvent,
+  showEvents = true,
+  showBuffers = false,
+  onToggleEvents,
+  onToggleBuffers,
+  className = "",
+}: IndiaMapVisualizationProps) {
+  const [baseTile, setBaseTile] =
+    useState<BaseTileType>("thermal");
+
+  const [fullscreen, setFullscreen] =
+    useState(false);
+
+  const containerRef =
+    useRef<HTMLDivElement | null>(null);
+
+  // ==========================================================
+  // THERMAL DATE
+  // ==========================================================
+
+  const thermalDate = useMemo(() => {
+    const selectedDate = selectedEvent
+      ? getEventDate(selectedEvent)
+      : null;
+
+    if (selectedDate) {
+      return selectedDate;
+    }
+
+    const dates = events
+      .map(getEventDate)
+      .filter(
+        (date): date is string =>
+          typeof date === "string"
+      )
+      .sort();
+
+    if (dates.length > 0) {
+      return dates[dates.length - 1];
+    }
+
+    return "2025-03-19";
+  }, [events, selectedEvent]);
+
+  // ==========================================================
+  // VALID EVENTS
+  // ==========================================================
+
+  const validEvents = useMemo(() => {
+    return events.filter((event) => {
+      const lat = getLatitude(event);
+      const lng = getLongitude(event);
+
+      return (
+        Number.isFinite(lat) &&
+        Number.isFinite(lng) &&
+        lat >= 6 &&
+        lat <= 38 &&
+        lng >= 68 &&
+        lng <= 98
+      );
+    });
+  }, [events]);
+
+  // ==========================================================
+  // FULLSCREEN
+  // ==========================================================
+
+  const toggleFullscreen = async () => {
+    const element = containerRef.current;
+
+    if (!element) {
+      return;
+    }
+
+    try {
+      if (!document.fullscreenElement) {
+        await element.requestFullscreen();
+        setFullscreen(true);
+      } else {
+        await document.exitFullscreen();
+        setFullscreen(false);
+      }
+    } catch {
+      setFullscreen(false);
+    }
+  };
+
+  // ==========================================================
+  // RESET
+  // ==========================================================
+
+  const resetMap = () => {
+    window.dispatchEvent(
+      new CustomEvent("veyronix-map-reset")
+    );
+  };
+
+  // ==========================================================
+  // TILE
+  // ==========================================================
+
+  const baseUrl =
+    baseTile === "satellite"
+      ? SATELLITE_URL
+      : OSM_URL;
+
+  const baseAttribution =
+    baseTile === "satellite"
+      ? "Tiles &copy; Esri"
+      : "&copy; OpenStreetMap contributors";
+
+  // ==========================================================
+  // RENDER
+  // ==========================================================
+
+  return (
+    <div
+      ref={containerRef}
+      className={`relative overflow-hidden rounded-2xl border border-cyan-900/60 bg-[#050a18] ${className} ${
+        fullscreen
+          ? "fixed inset-0 z-[9999] rounded-none"
+          : ""
+      }`}
+    >
+      {/* =====================================================
+          MAP HEADER
+      ===================================================== */}
+
+      <div className="pointer-events-none absolute left-4 top-4 z-[1000]">
+        <div className="rounded-xl border border-cyan-500/30 bg-[#050b19]/90 px-4 py-3 shadow-xl backdrop-blur-md">
+          <div className="flex items-center gap-2">
+            <Radio
+              size={14}
+              className="text-cyan-400"
+            />
+
+            <span className="text-[11px] font-bold tracking-[0.18em] text-cyan-300">
+              INDIA GEOSPATIAL GIS
+            </span>
+          </div>
+
+          <div className="mt-1 text-[10px] tracking-[0.12em] text-slate-400">
+            {baseTile === "thermal"
+              ? `NASA VIIRS THERMAL • ${thermalDate}`
+              : baseTile === "satellite"
+              ? "SATELLITE IMAGERY"
+              : "OPENSTREETMAP"}
+          </div>
+        </div>
+      </div>
+
+      {/* =====================================================
+          TOP RIGHT CONTROLS
+      ===================================================== */}
+
+      <div className="absolute right-4 top-4 z-[1000]">
+        <div className="flex flex-wrap items-center gap-1 rounded-xl border border-cyan-900/60 bg-[#080d24]/95 p-1 shadow-2xl backdrop-blur-md">
+          {/* SATELLITE */}
+
+          <button
+            type="button"
+            onClick={() =>
+              setBaseTile("satellite")
+            }
+            className={`flex items-center gap-1.5 rounded-lg px-3 py-2 text-[10px] font-bold tracking-wider transition ${
+              baseTile === "satellite"
+                ? "bg-cyan-500/20 text-cyan-300"
+                : "text-slate-400 hover:bg-white/5 hover:text-white"
+            }`}
+          >
+            <Satellite size={13} />
+            Satellite
+          </button>
+
+          {/* THERMAL */}
+
+          <button
+            type="button"
+            onClick={() =>
+              setBaseTile("thermal")
+            }
+            className={`flex items-center gap-1.5 rounded-lg px-3 py-2 text-[10px] font-bold tracking-wider transition ${
+              baseTile === "thermal"
+                ? "bg-orange-500/20 text-orange-300"
+                : "text-slate-400 hover:bg-white/5 hover:text-white"
+            }`}
+          >
+            <Flame size={13} />
+            Thermal
+          </button>
+
+          {/* OSM */}
+
+          <button
+            type="button"
+            onClick={() =>
+              setBaseTile("osm_standard")
+            }
+            className={`flex items-center gap-1.5 rounded-lg px-3 py-2 text-[10px] font-bold tracking-wider transition ${
+              baseTile === "osm_standard"
+                ? "bg-cyan-500/20 text-cyan-300"
+                : "text-slate-400 hover:bg-white/5 hover:text-white"
+            }`}
+          >
+            <MapIcon size={13} />
+            OSM
+          </button>
+
+          {/* EVENTS */}
+
+          {onToggleEvents && (
+            <button
+              type="button"
+              onClick={onToggleEvents}
+              className={`flex items-center gap-1.5 rounded-lg px-3 py-2 text-[10px] font-bold tracking-wider transition ${
+                showEvents
+                  ? "bg-emerald-500/20 text-emerald-300"
+                  : "text-slate-500"
+              }`}
+            >
+              <Radio size={13} />
+              Events
+            </button>
+          )}
+
+          {/* BUFFERS */}
+
+          {onToggleBuffers && (
+            <button
+              type="button"
+              onClick={onToggleBuffers}
+              className={`flex items-center gap-1.5 rounded-lg px-3 py-2 text-[10px] font-bold tracking-wider transition ${
+                showBuffers
+                  ? "bg-purple-500/20 text-purple-300"
+                  : "text-slate-500"
+              }`}
+            >
+              <Layers size={13} />
+              Buffers
+            </button>
+          )}
+
+          {/* RESET */}
+
+          <button
+            type="button"
+            onClick={resetMap}
+            className="rounded-lg p-2 text-slate-400 transition hover:bg-white/5 hover:text-white"
+            title="Reset map"
+          >
+            <RotateCcw size={14} />
+          </button>
+
+          {/* FULLSCREEN */}
+
+          <button
+            type="button"
+            onClick={toggleFullscreen}
+            className="rounded-lg p-2 text-slate-400 transition hover:bg-white/5 hover:text-white"
+            title="Fullscreen"
+          >
+            {fullscreen ? (
+              <Minimize2 size={14} />
+            ) : (
+              <Maximize2 size={14} />
+            )}
+          </button>
+        </div>
+      </div>
+
+      {/* =====================================================
+          MAP
+      ===================================================== */}
+
+      <MapContainer
+        center={INDIA_CENTER}
+        zoom={INDIA_ZOOM}
+        minZoom={4}
+        maxZoom={12}
+        scrollWheelZoom={true}
+        className="h-full min-h-[520px] w-full"
+        style={{
+          background: "#050a18",
+        }}
+      >
+        {/* BASE MAP */}
+
+        <TileLayer
+          key={baseTile}
+          url={baseUrl}
+          attribution={baseAttribution}
+          maxZoom={19}
+        />
+
+        {/* ===================================================
+            REAL NASA VIIRS THERMAL LAYER
+            =================================================== */}
+
+        {baseTile === "thermal" && (
+          <NasaThermalLayer
+            date={thermalDate}
+          />
+        )}
+
+        <MapResizeHandler />
+
+        <MapController
+          selectedEvent={selectedEvent}
+        />
+
+        {/* ===================================================
+            VEYRONIX EVENTS
+            =================================================== */}
+
+        {showEvents &&
+          validEvents.map((event) => {
+            const lat = getLatitude(event);
+            const lng = getLongitude(event);
+
+            const intensity =
+              getHeatIntensity(event);
+
+            const radius =
+              getHeatRadius(event);
+
+            const frp = getFRP(event);
+
+            const confidence =
+              getConfidence(event);
+
+            const id = getEventId(event);
+
+            const priority =
+              getPriority(event);
+
+            const isSelected =
+              selectedEvent &&
+              String(getEventId(selectedEvent)) ===
+                String(id);
+
+            /*
+             * OUTER FIRE HEAT GLOW
+             */
+
+            return (
+              <React.Fragment
+                key={`event-${id}`}
+              >
+                {baseTile === "thermal" && (
+                  <>
+                    <CircleMarker
+                      center={[lat, lng]}
+                      radius={radius * 2.2}
+                      pathOptions={{
+                        stroke: false,
+                        fillColor:
+                          intensity > 0.75
+                            ? "#ff2d00"
+                            : intensity > 0.45
+                            ? "#ff7a00"
+                            : "#ffc400",
+                        fillOpacity:
+                          0.08 +
+                          intensity * 0.10,
+                      }}
+                    />
+
+                    <CircleMarker
+                      center={[lat, lng]}
+                      radius={radius * 1.5}
+                      pathOptions={{
+                        stroke: false,
+                        fillColor:
+                          intensity > 0.75
+                            ? "#ff3b00"
+                            : "#ff9d00",
+                        fillOpacity:
+                          0.12 +
+                          intensity * 0.12,
+                      }}
+                    />
+                  </>
+                )}
+
+                {/* EVENT CORE */}
+
+                <CircleMarker
+                  center={[lat, lng]}
+                  radius={
+                    isSelected
+                      ? 10
+                      : 5 + intensity * 4
+                  }
+                  pathOptions={{
+                    color:
+                      isSelected
+                        ? "#ffffff"
+                        : baseTile ===
+                          "thermal"
+                        ? intensity >
+                          0.75
+                          ? "#ff2600"
+                          : intensity >
+                            0.45
+                          ? "#ff8a00"
+                          : "#ffd000"
+                        : "#00e6a7",
+
+                    weight: isSelected
+                      ? 3
+                      : 1.5,
+
+                    fillColor:
+                      baseTile ===
+                      "thermal"
+                        ? intensity >
+                          0.75
+                          ? "#ff1800"
+                          : intensity >
+                            0.45
+                          ? "#ff7b00"
+                          : "#ffd000"
+                        : "#00dca4",
+
+                    fillOpacity:
+                      baseTile ===
+                      "thermal"
+                        ? 0.85
+                        : 0.72,
+                  }}
+                  eventHandlers={{
+                    click: () => {
+                      onSelectEvent?.(
+                        event
+                      );
+                    },
+                  }}
+                >
+                  <Popup>
+                    <div className="min-w-[220px] font-sans">
+                      <div className="mb-2 flex items-center justify-between">
+                        <strong>
+                          VEYRONIX EVENT
+                        </strong>
+
+                        <span>
+                          #{id}
+                        </span>
+                      </div>
+
+                      <div className="space-y-1 text-sm">
+                        <div>
+                          <b>Latitude:</b>{" "}
+                          {lat.toFixed(5)}
+                        </div>
+
+                        <div>
+                          <b>Longitude:</b>{" "}
+                          {lng.toFixed(5)}
+                        </div>
+
+                        <div>
+                          <b>Peak FRP:</b>{" "}
+                          {frp.toFixed(2)}
+                        </div>
+
+                        <div>
+                          <b>Confidence:</b>{" "}
+                          {(confidence * 100).toFixed(
+                            1
+                          )}
+                          %
+                        </div>
+
+                        <div>
+                          <b>Priority:</b>{" "}
+                          {priority}
+                        </div>
+
+                        {baseTile ===
+                          "thermal" && (
+                          <div>
+                            <b>Fire intensity:</b>{" "}
+                            {(
+                              intensity * 100
+                            ).toFixed(0)}
+                            %
+                          </div>
+                        )}
+                      </div>
+
+                      {baseTile ===
+                        "thermal" && (
+                        <div className="mt-3 rounded-md bg-orange-100 px-2 py-1 text-xs text-orange-900">
+                          NASA VIIRS 375m
+                          thermal context
+                        </div>
+                      )}
+                    </div>
+                  </Popup>
+                </CircleMarker>
+              </React.Fragment>
+            );
+          })}
+      </MapContainer>
+
+      {/* =====================================================
+          THERMAL LEGEND
+      ===================================================== */}
+
+      {baseTile === "thermal" && (
+        <div className="absolute bottom-4 left-4 z-[1000] rounded-xl border border-orange-500/30 bg-[#070b19]/95 px-4 py-3 shadow-xl backdrop-blur-md">
+          <div className="mb-2 flex items-center gap-2">
+            <Flame
+              size={14}
+              className="text-orange-400"
+            />
+
+            <span className="text-[10px] font-bold tracking-[0.15em] text-orange-300">
+              THERMAL INTENSITY
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <div className="h-2 w-28 rounded-full bg-gradient-to-r from-yellow-300 via-orange-500 to-red-600" />
+
+            <div className="flex gap-3 text-[9px] text-slate-400">
+              <span>LOW</span>
+              <span>HIGH</span>
+            </div>
+          </div>
+
+          <div className="mt-2 text-[9px] text-slate-500">
+            NASA VIIRS 375m thermal anomalies
+          </div>
+        </div>
+      )}
+
+      {/* =====================================================
+          EVENT COUNT
+      ===================================================== */}
+
+      <div className="absolute bottom-4 right-4 z-[1000] rounded-xl border border-cyan-900/60 bg-[#070b19]/95 px-3 py-2 backdrop-blur-md">
+        <div className="text-[9px] tracking-[0.15em] text-slate-500">
+          Veyronix Events
+        </div>
+
+        <div className="text-sm font-bold text-cyan-300">
+          {validEvents.length}
+        </div>
+      </div>
+    </div>
+  );
+}
+export { IndiaMapVisualization };
+
+
+investigation.tsx
+
+import React, { useMemo, useState } from 'react';
+import {
+  ShieldAlert,
+  CheckCircle2,
+  AlertTriangle,
+  FolderOpen,
+  Plus,
+  Send,
+  User,
+  MapPin,
+  Flame,
+  Check,
+  FileText,
+  LocateFixed,
+  Satellite,
+  Activity,
+  BrainCircuit,
+  ExternalLink,
+  Clock3,
+  Target,
+  CircleDot,
+} from 'lucide-react';
+
+import type {
+  InvestigationCase,
+  PriorityLevel,
+  ThermalEvent,
+} from '../../types';
+
+import { TypewriterHeading } from '../TypewriterHeading';
+
+interface InvestigationPageProps {
+  cases: InvestigationCase[];
+  events: ThermalEvent[];
+  selectedCaseId: string | null;
+  onSelectCase: (caseId: string) => void;
+  onUpdateCaseStatus: (
+    caseId: string,
+    newStatus: InvestigationCase['status'],
+  ) => void;
+  onAddCaseNote: (
+    caseId: string,
+    noteText: string,
+  ) => void;
+}
+
+const SOURCE_LABELS = [
+  {
+    key: 'industrial' as const,
+    label: 'Industrial',
+  },
+  {
+    key: 'agricultural' as const,
+    label: 'Agriculture / Biomass',
+  },
+  {
+    key: 'vegetation' as const,
+    label: 'Forest / Natural',
+  },
+  {
+    key: 'other' as const,
+    label: 'Waste / Other',
+  },
+];
+
+function priorityClasses(
+  priority: PriorityLevel,
+) {
+  switch (priority) {
+    case 'CRITICAL':
+      return {
+        badge:
+          'bg-red-500/15 text-red-300 border-red-500/40',
+        text: 'text-red-300',
+        dot: 'bg-red-400',
+      };
+
+    case 'HIGH':
+      return {
+        badge:
+          'bg-orange-500/15 text-orange-300 border-orange-500/40',
+        text: 'text-orange-300',
+        dot: 'bg-orange-400',
+      };
+
+    case 'MEDIUM':
+      return {
+        badge:
+          'bg-amber-500/15 text-amber-300 border-amber-500/40',
+        text: 'text-amber-300',
+        dot: 'bg-amber-400',
+      };
+
+    case 'LOW':
+      return {
+        badge:
+          'bg-emerald-500/15 text-emerald-300 border-emerald-500/40',
+        text: 'text-emerald-300',
+        dot: 'bg-emerald-400',
+      };
+
+    default:
+      return {
+        badge:
+          'bg-slate-500/15 text-slate-300 border-slate-500/40',
+        text: 'text-slate-300',
+        dot: 'bg-slate-400',
+      };
+  }
+}
+
+function statusLabel(
+  status: InvestigationCase['status'],
+) {
+  return status.replace('_', ' ');
+}
+
+function formatNumber(
+  value: unknown,
+  digits = 2,
+) {
+  const number = Number(value);
+
+  if (!Number.isFinite(number)) {
+    return '—';
+  }
+
+  return number.toFixed(digits);
+}
+
+function formatPercent(
+  value: unknown,
+) {
+  const number = Number(value);
+
+  if (!Number.isFinite(number)) {
+    return '0%';
+  }
+
+  return `${Math.round(
+    Math.max(0, Math.min(1, number)) * 100,
+  )}%`;
+}
+
+function formatDateTime(
+  value?: string,
+) {
+  if (!value) {
+    return 'Time unavailable';
+  }
+
+  const parsed = new Date(value);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+
+  return parsed.toLocaleString('en-IN', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+    timeZone: 'Asia/Kolkata',
+  });
+}
+
+export const InvestigationPage: React.FC<
+  InvestigationPageProps
+> = ({
+  cases,
+  events,
+  selectedCaseId,
+  onSelectCase,
+  onUpdateCaseStatus,
+  onAddCaseNote,
+}) => {
+  const [newNote, setNewNote] =
+    useState('');
+  const [actionFeedback, setActionFeedback] =
+    useState<string | null>(null);
+
+  const activeCase = useMemo(
+    () =>
+      cases.find(
+        currentCase =>
+          currentCase.caseId === selectedCaseId,
+      ) ?? cases[0],
+    [cases, selectedCaseId],
+  );
+
+  /*
+   * The investigation docket is linked back to the
+   * actual ThermalEvent. This prevents the page from
+   * inventing facility/location/ML evidence.
+   */
+  const activeEvent = useMemo(() => {
+    if (!activeCase) {
+      return undefined;
+    }
+
+    return events.find(
+      event =>
+        String(event.id) ===
+        String(activeCase.eventId),
+    );
+  }, [events, activeCase]);
+
+  const liveSource =
+    activeEvent?.likelySource ??
+    'Uncertain';
+
+  const liveConfidence =
+    activeEvent?.confidence ?? 0;
+
+  const livePriority =
+    activeEvent?.investigationPriority ??
+    activeCase?.priority ??
+    'UNKNOWN';
+
+  const livePriorityScore =
+    activeEvent?.priorityScore ??
+    activeCase?.score ??
+    0;
+
+  const liveAbnormality =
+    activeEvent?.abnormality ??
+    'UNKNOWN';
+
+  const liveAbnormalityScore =
+    activeEvent?.abnormalityScore ?? 0;
+
+  const liveAnomaly =
+    activeEvent?.insufficientEvidence === true
+      ? 'Review required'
+      : activeEvent?.abnormality ??
+        'Not available';
+
+  const probabilities =
+    activeEvent?.sourceProbabilities;
+
+  const handleAction = (
+    status: InvestigationCase['status'],
+    label: string,
+  ) => {
+    if (!activeCase) {
+      return;
+    }
+
+    onUpdateCaseStatus(
+      activeCase.caseId,
+      status,
+    );
+
+    setActionFeedback(label);
+
+    window.setTimeout(
+      () => setActionFeedback(null),
+      3000,
+    );
+  };
+
+  const handleAddNoteSubmit = (
+    event: React.FormEvent,
+  ) => {
+    event.preventDefault();
+
+    if (
+      !newNote.trim() ||
+      !activeCase
+    ) {
+      return;
+    }
+
+    onAddCaseNote(
+      activeCase.caseId,
+      newNote.trim(),
+    );
+
+    setNewNote('');
+
+    setActionFeedback(
+      'Investigator note added to the case record.',
+    );
+
+    window.setTimeout(
+      () => setActionFeedback(null),
+      3000,
+    );
+  };
+
+  const openMap = () => {
+    if (!activeEvent) {
+      return;
+    }
+
+    const { lat, lng } = activeEvent;
+
+    window.open(
+      `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`,
+      '_blank',
+      'noopener,noreferrer',
+    );
+  };
+
+  return (
+    <div className="space-y-6 select-text">
+      {/* =====================================================
+          HEADER
+      ====================================================== */}
+      <div className="bg-[#080d25]/95 border border-[#1e2a60] rounded-2xl p-4 sm:p-5 shadow-2xl">
+        <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2.5">
+              <ShieldAlert className="w-6 h-6 text-cyan-400" />
+
+              <TypewriterHeading
+                as="h1"
+                text="THERMAL EVENT INVESTIGATION"
+                className="text-xl sm:text-2xl font-bold text-white"
+                glow={true}
+                glowColor="cyan"
+                speed={20}
+              />
+            </div>
+
+            <p className="text-xs sm:text-sm text-slate-400 mt-1 font-sans-clean">
+              Human verification workspace linked directly to VEYRONIX thermal-event telemetry and ML attribution.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="px-3 py-1.5 rounded-xl bg-cyan-950/40 border border-cyan-500/40 text-cyan-300 text-xs font-heading font-bold">
+              {cases.length} OPEN CASE{cases.length === 1 ? '' : 'S'}
+            </span>
+
+            <span className="px-3 py-1.5 rounded-xl bg-emerald-950/30 border border-emerald-500/30 text-emerald-300 text-xs font-heading font-bold flex items-center gap-1.5">
+              <CircleDot className="w-3.5 h-3.5" />
+              LIVE EVENT LINK
+            </span>
+          </div>
+        </div>
+
+        {actionFeedback && (
+          <div className="mt-4 p-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-xs font-semibold text-emerald-300 flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4" />
+            {actionFeedback}
+          </div>
+        )}
+      </div>
+
+      {!activeCase ? (
+        <div className="rounded-2xl border border-dashed border-[#26366e] bg-[#070b1e]/80 p-8 text-center">
+          <Satellite className="w-10 h-10 mx-auto text-cyan-400/70 mb-3" />
+
+          <h2 className="text-lg font-bold text-white font-heading">
+            NO INVESTIGATION CASES
+          </h2>
+
+          <p className="text-sm text-slate-400 max-w-xl mx-auto mt-2">
+            Select a real thermal event from Event Analysis and create a field-investigation docket when the evidence requires human verification.
+          </p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 xl:grid-cols-12 gap-5">
+          {/* =================================================
+              CASE LIST
+          ================================================== */}
+          <div className="xl:col-span-4 space-y-3">
+            <TypewriterHeading
+              as="h2"
+              text="INVESTIGATION DOCKET"
+              className="text-xs font-bold uppercase text-cyan-300 pb-2 border-b border-[#1b2554]"
+              glow={true}
+              glowColor="cyan"
+              speed={25}
+            />
+
+            <div className="space-y-3">
+              {cases.map(currentCase => {
+                const isSelected =
+                  activeCase.caseId ===
+                  currentCase.caseId;
+
+                const linkedEvent =
+                  events.find(
+                    event =>
+                      String(event.id) ===
+                      String(
+                        currentCase.eventId,
+                      ),
+                  );
+
+                const priority =
+                  linkedEvent?.investigationPriority ??
+                  currentCase.priority;
+
+                const classes =
+                  priorityClasses(
+                    priority,
+                  );
+
+                return (
+                  <button
+                    type="button"
+                    key={currentCase.caseId}
+                    onClick={() =>
+                      onSelectCase(
+                        currentCase.caseId,
+                      )
+                    }
+                    className={`w-full text-left p-4 rounded-2xl border transition-all ${
+                      isSelected
+                        ? 'bg-[#0e163d] border-cyan-400 shadow-[0_0_20px_rgba(6,182,212,0.35)] ring-1 ring-cyan-400/40'
+                        : 'bg-[#070b1e] border-[#1b2554] hover:bg-[#0c1232] hover:border-cyan-500/40'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-bold font-mono text-cyan-300">
+                        {currentCase.caseId}
+                      </span>
+
+                      <span
+                        className={`px-2 py-0.5 rounded border text-[10px] font-bold ${classes.badge}`}
+                      >
+                        {priority}
+                      </span>
+                    </div>
+
+                    <h3 className="text-sm font-bold font-heading text-white mt-2 leading-snug">
+                      {linkedEvent?.name ??
+                        currentCase.eventName}
+                    </h3>
+
+                    <div className="mt-1 text-[11px] text-slate-400 font-mono">
+                      Event:{' '}
+                      <span className="text-slate-200">
+                        {currentCase.eventId}
+                      </span>
+                    </div>
+
+                    {linkedEvent ? (
+                      <div className="mt-2 grid grid-cols-2 gap-2">
+                        <MiniMetric
+                          label="Source"
+                          value={
+                            linkedEvent.likelySource
+                          }
+                        />
+
+                        <MiniMetric
+                          label="Confidence"
+                          value={formatPercent(
+                            linkedEvent.confidence,
+                          )}
+                        />
+                      </div>
+                    ) : (
+                      <div className="mt-2 text-[10px] text-amber-300">
+                        Live telemetry not loaded
+                      </div>
+                    )}
+
+                    <div className="mt-3 pt-2 border-t border-[#1b2554] flex items-center justify-between">
+                      <span className="text-[11px] font-mono font-bold text-cyan-400">
+                        Priority {Math.round(
+                          linkedEvent?.priorityScore ??
+                            currentCase.score ??
+                            0,
+                        )}/100
+                      </span>
+
+                      <span className="px-2 py-0.5 rounded-full bg-[#0f1638] text-[10px] font-bold text-slate-300 uppercase">
+                        {statusLabel(
+                          currentCase.status,
+                        )}
+                      </span>
+                    </div>
+
+                    <div className="mt-3 flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 text-xs font-heading font-bold">
+                      <FolderOpen className="w-3.5 h-3.5" />
+                      OPEN CASE
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* =================================================
+              ACTIVE CASE
+          ================================================== */}
+          <div className="xl:col-span-8 bg-[#080d25]/95 border border-[#1e2a60] rounded-2xl p-4 sm:p-5 shadow-2xl space-y-5">
+            {/* Case identity */}
+            <div className="pb-4 border-b border-[#1b2554]">
+              <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2 mb-2">
+                    <span className="text-sm font-bold font-mono text-cyan-400">
+                      {activeCase.caseId}
+                    </span>
+
+                    <span className="text-xs text-slate-500">
+                      •
+                    </span>
+
+                    <span className="text-xs text-slate-400 font-mono">
+                      Event {activeCase.eventId}
+                    </span>
+                  </div>
+
+                  <h2 className="text-xl sm:text-2xl font-bold font-heading text-white leading-tight">
+                    {activeEvent?.name ??
+                      activeCase.eventName}
+                  </h2>
+
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2 text-xs text-slate-400">
+                    <span className="flex items-center gap-1.5">
+                      <MapPin className="w-3.5 h-3.5 text-cyan-400" />
+
+                      {activeEvent
+                        ? `${formatNumber(
+                            activeEvent.lat,
+                            4,
+                          )}, ${formatNumber(
+                            activeEvent.lng,
+                            4,
+                          )}`
+                        : activeCase.location}
+                    </span>
+
+                    {activeEvent?.state && (
+                      <span>
+                        {activeEvent.state}
+                      </span>
+                    )}
+
+                    {activeEvent?.region && (
+                      <span>
+                        • {activeEvent.region}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
+                  <span
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold border ${
+                      priorityClasses(
+                        livePriority,
+                      ).badge
+                    }`}
+                  >
+                    {livePriority} PRIORITY
+                  </span>
+
+                  <span className="px-3 py-1.5 rounded-xl bg-[#0f1638] text-xs font-bold font-heading text-slate-200 border border-[#1e2a60]">
+                    {statusLabel(
+                      activeCase.status,
+                    )}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* =================================================
+                LIVE EVENT TELEMETRY
+            ================================================== */}
+            {activeEvent ? (
+              <>
+                <section>
+                  <div className="flex items-center justify-between mb-2.5">
+                    <TypewriterHeading
+                      as="h3"
+                      text="LIVE EVENT TELEMETRY"
+                      className="text-xs font-bold uppercase text-cyan-300"
+                      glow={true}
+                      glowColor="cyan"
+                      speed={25}
+                    />
+
+                    <button
+                      type="button"
+                      onClick={openMap}
+                      className="px-2.5 py-1 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 text-[10px] font-bold flex items-center gap-1.5 hover:bg-cyan-500 hover:text-slate-950 transition-colors"
+                    >
+                      <ExternalLink className="w-3 h-3" />
+                      OPEN COORDINATE
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
+                    <MetricCard
+                      icon={
+                        <Flame className="w-4 h-4" />
+                      }
+                      label="Peak FRP"
+                      value={`${formatNumber(
+                        activeEvent.frpMw,
+                        2,
+                      )} MW`}
+                      tone="red"
+                    />
+
+                    <MetricCard
+                      icon={
+                        <Activity className="w-4 h-4" />
+                      }
+                      label="Abnormality"
+                      value={`${formatNumber(
+                        liveAbnormalityScore,
+                        0,
+                      )}/100`}
+                      tone="amber"
+                    />
+
+                    <MetricCard
+                      icon={
+                        <BrainCircuit className="w-4 h-4" />
+                      }
+                      label="ML confidence"
+                      value={formatPercent(
+                        liveConfidence,
+                      )}
+                      tone="cyan"
+                    />
+
+                    <MetricCard
+                      icon={
+                        <Target className="w-4 h-4" />
+                      }
+                      label="Priority score"
+                      value={`${Math.round(
+                        livePriorityScore,
+                      )}/100`}
+                      tone="purple"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5 mt-2.5">
+                    <InfoMetric
+                      label="Predicted source"
+                      value={liveSource}
+                    />
+
+                    <InfoMetric
+                      label="Sensor"
+                      value={
+                        activeEvent.sensor ||
+                        'FIRMS'
+                      }
+                    />
+
+                    <InfoMetric
+                      label="Brightness"
+                      value={`${formatNumber(
+                        activeEvent.brightnessTempK,
+                        1,
+                      )} K`}
+                    />
+
+                    <InfoMetric
+                      label="Detected"
+                      value={formatDateTime(
+                        activeEvent.detectionTimeUtc,
+                      )}
+                    />
+                  </div>
+                </section>
+
+                {/* =================================================
+                    SOURCE PROBABILITIES
+                ================================================== */}
+                <section>
+                  <div className="flex items-center gap-2 mb-2.5">
+                    <BrainCircuit className="w-4 h-4 text-purple-400" />
+
+                    <h3 className="text-xs font-bold uppercase text-purple-300 font-heading">
+                      ML SOURCE ATTRIBUTION
+                    </h3>
+
+                    <span className="text-[10px] text-slate-500 font-mono">
+                      LightGBM
+                    </span>
+                  </div>
+
+                  <div className="rounded-xl bg-[#070b1e] border border-[#1b2554] p-4 space-y-3">
+                    {SOURCE_LABELS.map(
+                      source => {
+                        const probability =
+                          Number(
+                            probabilities?.[
+                              source.key
+                            ] ?? 0,
+                          );
+
+                        const width =
+                          Math.max(
+                            0,
+                            Math.min(
+                              100,
+                              probability *
+                                100,
+                            ),
+                          );
+
+                        const isPredicted =
+                          source.label ===
+                          liveSource ||
+                          source.key ===
+                            'industrial' &&
+                            liveSource ===
+                              'Industrial' ||
+                          source.key ===
+                            'agricultural' &&
+                            liveSource ===
+                              'Agriculture_Biomass' ||
+                          source.key ===
+                            'vegetation' &&
+                            liveSource ===
+                              'Forest_Natural' ||
+                          source.key ===
+                            'other' &&
+                            liveSource ===
+                              'Waste_Other';
+
+                        return (
+                          <div
+                            key={source.key}
+                          >
+                            <div className="flex items-center justify-between text-[11px] mb-1">
+                              <span
+                                className={
+                                  isPredicted
+                                    ? 'text-white font-bold'
+                                    : 'text-slate-400'
+                                }
+                              >
+                                {source.label}
+                              </span>
+
+                              <span className="font-mono text-slate-300">
+                                {Math.round(
+                                  width,
+                                )}
+                                %
+                              </span>
+                            </div>
+
+                            <div className="h-2 rounded-full bg-[#151d40] overflow-hidden">
+                              <div
+                                className={`h-full rounded-full transition-all ${
+                                  isPredicted
+                                    ? 'bg-cyan-400'
+                                    : 'bg-slate-600'
+                                }`}
+                                style={{
+                                  width: `${width}%`,
+                                }}
+                              />
+                            </div>
+                          </div>
+                        );
+                      },
+                    )}
+
+                    <div className="pt-2 border-t border-[#1b2554] flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-slate-500">
+                      <span>
+                        Model output — not independent ground truth.
+                      </span>
+
+                      {activeEvent.insufficientEvidence && (
+                        <span className="text-amber-300 font-semibold">
+                          Review required
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </section>
+
+                {/* =================================================
+                    LOCATION / SPATIAL CONTEXT
+                ================================================== */}
+                <section>
+                  <div className="flex items-center gap-2 mb-2.5">
+                    <LocateFixed className="w-4 h-4 text-emerald-400" />
+
+                    <h3 className="text-xs font-bold uppercase text-emerald-300 font-heading">
+                      HOTSPOT LOCATION CONTEXT
+                    </h3>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div className="rounded-xl bg-[#070b1e] border border-[#1b2554] p-4">
+                      <div className="text-[10px] uppercase text-slate-500 font-heading font-bold">
+                        FIRMS event coordinate
+                      </div>
+
+                      <div className="mt-2 text-lg font-mono font-bold text-white">
+                        {formatNumber(
+                          activeEvent.lat,
+                          5,
+                        )}
+                        <span className="text-slate-500 mx-1">
+                          ,
+                        </span>
+                        {formatNumber(
+                          activeEvent.lng,
+                          5,
+                        )}
+                      </div>
+
+                      <p className="text-[10px] text-slate-500 mt-2">
+                        Satellite hotspot coordinate; not a building-level exact fire boundary.
+                      </p>
+                    </div>
+
+                    <div className="rounded-xl bg-[#070b1e] border border-[#1b2554] p-4">
+                      <div className="text-[10px] uppercase text-slate-500 font-heading font-bold">
+                        Spatial context
+                      </div>
+
+                      <div className="mt-2 text-sm font-bold text-white">
+                        {activeEvent.spatialContext
+                          ?.landUseClassification ??
+                          'Context unavailable'}
+                      </div>
+
+                      <div className="mt-2 grid grid-cols-2 gap-2 text-[10px] text-slate-400">
+                        <span>
+                          Buffer:{' '}
+                          <strong className="text-slate-200">
+                            {formatNumber(
+                              activeEvent
+                                .spatialContext
+                                ?.bufferRadiusKm,
+                              1,
+                            )}{' '}
+                            km
+                          </strong>
+                        </span>
+
+                        <span>
+                          Nearby facilities:{' '}
+                          <strong className="text-slate-200">
+                            {Number.isFinite(
+                              Number(
+                                activeEvent
+                                  .spatialContext
+                                  ?.nearbyFacilitiesCount,
+                              ),
+                            )
+                              ? activeEvent
+                                  .spatialContext
+                                  .nearbyFacilitiesCount
+                              : '—'}
+                          </strong>
+                        </span>
+                      </div>
+
+                      {activeEvent
+                        .spatialContext
+                        ?.facilityName && (
+                        <div className="mt-2 text-[10px] text-cyan-300">
+                          Nearby context:{' '}
+                          {
+                            activeEvent
+                              .spatialContext
+                              .facilityName
+                          }
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </section>
+
+                {/* =================================================
+                    EVIDENCE
+                ================================================== */}
+                <section>
+                  <div className="flex items-center justify-between mb-2.5">
+                    <TypewriterHeading
+                      as="h3"
+                      text="AVAILABLE EVIDENCE"
+                      className="text-xs font-bold uppercase text-cyan-300"
+                      glow={true}
+                      glowColor="cyan"
+                      speed={25}
+                    />
+
+                    <span className="text-[10px] text-slate-500">
+                      {activeEvent.evidence
+                        ?.length ?? 0}{' '}
+                      recorded items
+                    </span>
+                  </div>
+
+                  <div className="rounded-xl bg-[#070b1e] border border-[#1b2554] p-4 space-y-2">
+                    {activeEvent.evidence?.length ? (
+                      activeEvent.evidence.map(
+                        (evidence, index) => (
+                          <div
+                            key={`${activeEvent.id}-evidence-${index}`}
+                            className="flex items-start gap-2 text-xs text-slate-200"
+                          >
+                            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+
+                            <span>
+                              {evidence}
+                            </span>
+                          </div>
+                        ),
+                      )
+                    ) : (
+                      <div className="text-xs text-slate-500">
+                        No additional evidence record is attached to this event.
+                      </div>
+                    )}
+
+                    {activeEvent.insufficientEvidence && (
+                      <div className="pt-2 mt-2 border-t border-[#1b2554] flex items-start gap-2 text-xs text-amber-300">
+                        <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+
+                        <span>
+                          Model evidence is insufficient for a confident attribution. Human verification is required.
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </section>
+
+                {/* =================================================
+                    ACTIONS
+                ================================================== */}
+                <section>
+                  <h3 className="text-xs font-bold uppercase text-white font-heading mb-2.5">
+                    INVESTIGATOR ACTIONS
+                  </h3>
+
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
+                    <ActionButton
+                      icon={
+                        <FileText className="w-3.5 h-3.5" />
+                      }
+                      label="Investigating"
+                      onClick={() =>
+                        handleAction(
+                          'INVESTIGATING',
+                          'Case marked as under investigation.',
+                        )
+                      }
+                    />
+
+                    <ActionButton
+                      icon={
+                        <MapPin className="w-3.5 h-3.5" />
+                      }
+                      label="Field request"
+                      onClick={() =>
+                        handleAction(
+                          'FIELD_REQUESTED',
+                          'Field verification requested.',
+                        )
+                      }
+                    />
+
+                    <ActionButton
+                      icon={
+                        <Plus className="w-3.5 h-3.5" />
+                      }
+                      label="Add note"
+                      onClick={() =>
+                        document
+                          .getElementById(
+                            'case-note-input',
+                          )
+                          ?.focus()
+                      }
+                    />
+
+                    <ActionButton
+                      icon={
+                        <Check className="w-3.5 h-3.5" />
+                      }
+                      label="Resolve"
+                      tone="green"
+                      onClick={() =>
+                        handleAction(
+                          'RESOLVED',
+                          'Case marked resolved.',
+                        )
+                      }
+                    />
+                  </div>
+                </section>
+              </>
+            ) : (
+              /* =================================================
+                 NO LIVE EVENT LINK
+              ================================================== */
+              <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-5">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0" />
+
+                  <div>
+                    <h3 className="text-sm font-bold text-amber-300 font-heading">
+                      LIVE EVENT TELEMETRY NOT LOADED
+                    </h3>
+
+                    <p className="text-xs text-slate-400 mt-1">
+                      This docket exists, but the corresponding ThermalEvent is not currently available in the frontend event set. No location, ML attribution, FRP or facility facts are being invented here.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* =================================================
+                CASE LOG
+            ================================================== */}
+            <section className="pt-1">
+              <TypewriterHeading
+                as="h3"
+                text="INVESTIGATION LOG"
+                className="text-xs font-bold uppercase text-cyan-300 mb-2.5"
+                glow={true}
+                glowColor="cyan"
+                speed={25}
+              />
+
+              <div className="space-y-2 mb-3">
+                {activeCase.notes?.length ? (
+                  activeCase.notes.map(
+                    note => (
+                      <div
+                        key={note.id}
+                        className="p-3 rounded-xl bg-[#070b1e] border border-[#1b2554]"
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <span className="font-bold font-heading text-white text-xs flex items-center gap-1.5">
+                            <User className="w-3.5 h-3.5 text-cyan-400" />
+                            {note.author}
+                          </span>
+
+                          <span className="text-[10px] text-slate-500 font-mono flex items-center gap-1">
+                            <Clock3 className="w-3 h-3" />
+                            {note.timestamp}
+                          </span>
+                        </div>
+
+                        <p className="text-xs text-slate-300 leading-relaxed mt-1.5">
+                          {note.text}
+                        </p>
+                      </div>
+                    )
+                  )
+                ) : (
+                  <div className="text-xs text-slate-500">
+                    No investigator notes yet.
+                  </div>
+                )}
+              </div>
+
+              <form
+                onSubmit={
+                  handleAddNoteSubmit
+                }
+                className="flex flex-col sm:flex-row gap-2"
+              >
+                <input
+                  id="case-note-input"
+                  type="text"
+                  value={newNote}
+                  onChange={event =>
+                    setNewNote(
+                      event.target.value,
+                    )
+                  }
+                  placeholder="Add an observation or field-verification note..."
+                  className="flex-1 min-w-0 px-3.5 py-2.5 rounded-xl bg-[#070b1e] border border-[#1e2c69] text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/30"
+                />
+
+                <button
+                  type="submit"
+                  disabled={!newNote.trim()}
+                  className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 disabled:opacity-40 disabled:cursor-not-allowed text-slate-950 text-xs font-bold font-heading uppercase flex items-center justify-center gap-1.5"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  POST NOTE
+                </button>
+              </form>
+            </section>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+/* ============================================================
+   SMALL UI COMPONENTS
+============================================================ */
+
+function MiniMetric({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="rounded-lg bg-[#0a1030] border border-[#1b2554] px-2.5 py-2">
+      <div className="text-[9px] uppercase text-slate-500 font-heading font-bold">
+        {label}
+      </div>
+
+      <div className="text-[10px] text-slate-200 font-mono font-semibold mt-0.5 truncate">
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function MetricCard({
+  icon,
+  label,
+  value,
+  tone,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+  tone:
+    | 'red'
+    | 'amber'
+    | 'cyan'
+    | 'purple';
+}) {
+  const toneClasses = {
+    red: 'text-red-300',
+    amber: 'text-amber-300',
+    cyan: 'text-cyan-300',
+    purple: 'text-purple-300',
+  };
+
+  return (
+    <div className="rounded-xl bg-[#070b1e] border border-[#1b2554] p-3">
+      <div
+        className={`flex items-center gap-1.5 text-[10px] uppercase font-heading font-bold ${toneClasses[tone]}`}
+      >
+        {icon}
+        {label}
+      </div>
+
+      <div className="text-base sm:text-lg font-bold font-mono text-white mt-1.5">
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function InfoMetric({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="rounded-xl bg-[#070b1e] border border-[#1b2554] px-3 py-2.5">
+      <div className="text-[9px] uppercase text-slate-500 font-heading font-bold">
+        {label}
+      </div>
+
+      <div className="text-[11px] text-slate-200 font-mono font-semibold mt-1 truncate">
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function ActionButton({
+  icon,
+  label,
+  onClick,
+  tone = 'default',
+}: {
+  icon: React.ReactNode;
+  label: string;
+  onClick: () => void;
+  tone?: 'default' | 'green';
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`p-2.5 rounded-xl border text-xs font-bold font-heading transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+        tone === 'green'
+          ? 'bg-emerald-500/10 hover:bg-emerald-500/80 border-emerald-500/40 text-emerald-300 hover:text-slate-950'
+          : 'bg-[#070b1e] hover:bg-[#0e163d] border-[#1e2c69] text-slate-200 hover:border-cyan-400/50'
+      }`}
+    >
+      {icon}
+      <span>{label}</span>
+    </button>
+  );
+}
+
+
+
+
+
+IndiaMapVisualization 2 -
+
+ import React, {
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
+
+import L from 'leaflet';
+
+import {
+  ThermalEvent,
+  PriorityLevel,
+} from '../types';
+
+import {
+  Maximize2,
+  RadioTower,
+  Compass,
+  MapPin,
+  ZoomIn,
+  ZoomOut,
+  RotateCcw,
+  X,
+  Expand,
+  Navigation,
+  Eye,
+  Flame,
+} from 'lucide-react';
+
+interface IndiaMapVisualizationProps {
+  events: ThermalEvent[];
+  selectedEvent?: ThermalEvent | null;
+  onSelectEvent: (
+    event: ThermalEvent,
+  ) => void;
+  isAnalyzing?: boolean;
+}
+
+/*
+ * ============================================================
+ * BASE MAP TYPES
+ * ============================================================
+ *
+ * Satellite  -> Esri satellite imagery
+ * Fire Heat  -> NASA VIIRS thermal anomaly layer
+ * OSM        -> OpenStreetMap
+ *
+ * GRID REMOVED
+ * OLD THERMAL MAP REMOVED
+ */
+
+type BaseTileType =
+  | 'satellite'
+  | 'fire_heat'
+  | 'osm_standard';
+
+/*
+ * ============================================================
+ * INDIA MAP CONFIG
+ * ============================================================
+ */
+
+const INDIA_BOUNDS: L.LatLngBoundsExpression = [
+  [6.5, 66.0],
+  [37.5, 99.0],
+];
+
+const INDIA_CENTER: [number, number] = [
+  22.5,
+  79.0,
+];
+
+const INDIA_DEFAULT_ZOOM = 5;
+
+/*
+ * ============================================================
+ * NASA FIRE LAYER
+ * ============================================================
+ *
+ * NASA GIBS VIIRS SNPP:
+ *
+ * VIIRS_SNPP_Thermal_Anomalies_375m_All
+ *
+ * This is an actual satellite thermal anomaly layer.
+ *
+ * NASA GIBS provides VIIRS 375m thermal anomaly
+ * products for fire visualization.
+ *
+ * We use a date dynamically so the layer can follow
+ * the selected event date when possible.
+ */
+
+const NASA_FIRE_LAYER =
+  'VIIRS_SNPP_Thermal_Anomalies_375m_All';
+
+/*
+ * ============================================================
+ * DATE HELPERS
+ * ============================================================
+ */
+
+const getDateOnly = (
+  value: unknown,
+): string | null => {
+  if (!value) {
+    return null;
+  }
+
+  const text = String(value);
+
+  /*
+   * Already YYYY-MM-DD.
+   */
+  const directMatch =
+    text.match(
+      /^(\d{4}-\d{2}-\d{2})/,
+    );
+
+  if (directMatch) {
+    return directMatch[1];
+  }
+
+  /*
+   * Try normal Date parsing.
+   */
+  const parsed =
+    new Date(text);
+
+  if (
+    Number.isNaN(
+      parsed.getTime(),
+    )
+  ) {
+    return null;
+  }
+
+  return parsed
+    .toISOString()
+    .slice(0, 10);
+};
+
+/*
+ * ============================================================
+ * GET EVENT DATE
+ * ============================================================
+ */
+
+const getEventDate = (
+  event?: ThermalEvent | null,
+): string | null => {
+  if (!event) {
+    return null;
+  }
+
+  const possibleValues = [
+    (event as any).eventDate,
+    (event as any).event_date,
+    (event as any).date,
+    (event as any).acq_date,
+    (event as any).start_time,
+  ];
+
+  for (
+    const value of possibleValues
+  ) {
+    const date =
+      getDateOnly(value);
+
+    if (date) {
+      return date;
+    }
+  }
+
+  return null;
+};
+
+/*
+ * ============================================================
+ * FALLBACK NASA DATE
+ * ============================================================
+ *
+ * If there is no selected event date,
+ * use current UTC date.
+ */
+
+const getDefaultFireDate = () => {
+  return new Date()
+    .toISOString()
+    .slice(0, 10);
+};
+
+/*
+ * ============================================================
+ * COMPONENT
+ * ============================================================
+ */
+
+export const IndiaMapVisualization: React.FC<
+  IndiaMapVisualizationProps
+> = ({
+  events,
+  selectedEvent,
+  onSelectEvent,
+  isAnalyzing = false,
+}) => {
+  const mapContainerRef =
+    useRef<HTMLDivElement>(null);
+
+  const mapInstanceRef =
+    useRef<L.Map | null>(null);
+
+  const tileLayerRef =
+    useRef<L.TileLayer | null>(null);
+
+  const fireLayerRef =
+    useRef<L.TileLayer | null>(null);
+
+  const eventsLayerRef =
+    useRef<L.LayerGroup | null>(null);
+
+  const buffersLayerRef =
+    useRef<L.LayerGroup | null>(null);
+
+  const [baseTile, setBaseTile] =
+    useState<BaseTileType>(
+      'fire_heat',
+    );
+
+  const [showEvents, setShowEvents] =
+    useState(true);
+
+  const [showBufferZones, setShowBufferZones] =
+    useState(true);
+
+  const [showEventCard, setShowEventCard] =
+    useState(true);
+
+  const [showTelemetryBar, setShowTelemetryBar] =
+    useState(true);
+
+  const [isFullscreen, setIsFullscreen] =
+    useState(false);
+
+  const [cursorCoords, setCursorCoords] =
+    useState<{
+      lat: number;
+      lng: number;
+    } | null>(null);
+
+  const [currentZoom, setCurrentZoom] =
+    useState(
+      INDIA_DEFAULT_ZOOM,
+    );
+
+  const [
+    fireLayerDate,
+    setFireLayerDate,
+  ] = useState(
+    getEventDate(
+      selectedEvent,
+    ) ||
+      getDefaultFireDate(),
+  );
+
+  /*
+   * ============================================================
+   * UPDATE FIRE DATE WHEN EVENT CHANGES
+   * ============================================================
+   */
+
+  useEffect(() => {
+    const eventDate =
+      getEventDate(
+        selectedEvent,
+      );
+
+    if (eventDate) {
+      setFireLayerDate(
+        eventDate,
+      );
+    }
+  }, [selectedEvent]);
+
+  /*
+   * ============================================================
+   * TILE SOURCE CONFIG
+   * ============================================================
+   */
+
+  const TILE_SOURCES: Record<
+    'satellite' | 'osm_standard' | 'fire_base',
+    {
+      url: string;
+      subdomains?: string | string[];
+      attribution: string;
+      name: string;
+      maxZoom: number;
+      maxNativeZoom: number;
+    }
+  > = {
+    /*
+     * ========================================================
+     * ESRI SATELLITE
+     * ========================================================
+     */
+
+    satellite: {
+      url:
+        'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+
+      attribution:
+        '&copy; Esri, Maxar, Earthstar Geographics, and the GIS User Community',
+
+      name:
+        'Satellite Imagery',
+
+      maxZoom: 22,
+
+      maxNativeZoom: 19,
+    },
+
+    /*
+     * ========================================================
+     * OPENSTREETMAP
+     * ========================================================
+     */
+
+    osm_standard: {
+      url:
+        'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+
+      subdomains: [
+        'a',
+        'b',
+        'c',
+      ],
+
+      attribution:
+        '&copy; OpenStreetMap contributors',
+
+      name:
+        'OpenStreetMap',
+
+      maxZoom: 22,
+
+      maxNativeZoom: 19,
+    },
+  
+
+      /*
+     * ========================================================
+     * DARK BASE FOR FIRE HEAT
+     * ========================================================
+     */
+
+fire_base: {
+  url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+  attribution: '&copy; Esri, HERE, Garmin, OpenStreetMap contributors',
+  name: 'Thermal Dark Base',
+  maxZoom: 22,
+  maxNativeZoom: 16,
+},
+  };
+
+  /*
+   * ============================================================
+   * NASA VIIRS FIRE TILE URL
+   * ============================================================
+   */
+
+  const getNASAFireTileUrl =
+    (
+      date: string,
+    ) => {
+      /*
+       * NASA GIBS WMTS:
+       *
+       * EPSG:3857
+       * VIIRS SNPP
+       * Thermal anomalies
+       * 375m
+       */
+
+      return (
+        `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/` +
+        `${NASA_FIRE_LAYER}/default/` +
+        `${date}/GoogleMapsCompatible_Level9/` +
+        `{z}/{y}/{x}.png`
+      );
+    };
+
+  /*
+   * ============================================================
+   * PRIORITY STYLE
+   * ============================================================
+   */
+
+  const getPriorityStyle = (
+    priority: PriorityLevel,
+  ) => {
+    switch (priority) {
+      case 'CRITICAL':
+        return {
+          color: '#ef4444',
+          border: '#b91c1c',
+          glow:
+            'rgba(239, 68, 68, 0.75)',
+          label: 'CRITICAL',
+        };
+
+      case 'HIGH':
+        return {
+          color: '#f97316',
+          border: '#ea580c',
+          glow:
+            'rgba(249, 115, 22, 0.75)',
+          label: 'HIGH',
+        };
+
+      case 'MEDIUM':
+        return {
+          color: '#f59e0b',
+          border: '#d97706',
+          glow:
+            'rgba(245, 158, 11, 0.75)',
+          label: 'MEDIUM',
+        };
+
+      case 'LOW':
+        return {
+          color: '#10b981',
+          border: '#059669',
+          glow:
+            'rgba(16, 185, 129, 0.75)',
+          label: 'LOW',
+        };
+
+      default:
+        return {
+          color: '#38bdf8',
+          border: '#0284c7',
+          glow:
+            'rgba(56, 189, 248, 0.75)',
+          label: 'REVIEW',
+        };
+    }
+  };
+
+  /*
+   * ============================================================
+   * VALID EVENT COORDINATES
+   * ============================================================
+   */
+
+  const getValidEventCoordinates =
+    () => {
+      return events
+        .map(
+          (event) => {
+            if (!event) {
+              return null;
+            }
+
+            const lat =
+              Number(
+                event.lat,
+              );
+
+            const lng =
+              Number(
+                event.lng,
+              );
+
+            if (
+              !Number.isFinite(
+                lat,
+              ) ||
+              !Number.isFinite(
+                lng,
+              )
+            ) {
+              return null;
+            }
+
+            if (
+              lat < -90 ||
+              lat > 90 ||
+              lng < -180 ||
+              lng > 180
+            ) {
+              return null;
+            }
+
+            return [
+              lat,
+              lng,
+            ] as [
+              number,
+              number,
+            ];
+          },
+        )
+        .filter(
+          (
+            item,
+          ): item is [
+            number,
+            number,
+          ] =>
+            item !== null,
+        );
+    };
+
+  /*
+   * ============================================================
+   * ESCAPE KEY
+   * ============================================================
+   */
+
+  useEffect(() => {
+    const handleKeyDown =
+      (
+        e: KeyboardEvent,
+      ) => {
+        if (
+          e.key === 'Escape' &&
+          isFullscreen
+        ) {
+          setIsFullscreen(
+            false,
+          );
+        }
+      };
+
+    window.addEventListener(
+      'keydown',
+      handleKeyDown,
+    );
+
+    return () => {
+      window.removeEventListener(
+        'keydown',
+        handleKeyDown,
+      );
+    };
+  }, [
+    isFullscreen,
+  ]);
+
+  /*
+   * ============================================================
+   * FULLSCREEN BODY
+   * ============================================================
+   */
+
+  useEffect(() => {
+    document.body.style.overflow =
+      isFullscreen
+        ? 'hidden'
+        : '';
+
+    const timers = [
+      window.setTimeout(
+        () => {
+          mapInstanceRef.current?.invalidateSize();
+        },
+        50,
+      ),
+
+      window.setTimeout(
+        () => {
+          mapInstanceRef.current?.invalidateSize();
+        },
+        180,
+      ),
+
+      window.setTimeout(
+        () => {
+          mapInstanceRef.current?.invalidateSize();
+        },
+        350,
+      ),
+    ];
+
+    return () => {
+      document.body.style.overflow =
+        '';
+
+      timers.forEach(
+        (timer) =>
+          window.clearTimeout(
+            timer,
+          ),
+      );
+    };
+  }, [
+    isFullscreen,
+  ]);
+
+  /*
+   * ============================================================
+   * INITIALIZE MAP
+   * ============================================================
+   */
+
+  useEffect(() => {
+    if (
+      !mapContainerRef.current ||
+      mapInstanceRef.current
+    ) {
+      return;
+    }
+
+    const map =
+      L.map(
+        mapContainerRef.current,
+        {
+          center:
+            INDIA_CENTER,
+
+          zoom:
+            INDIA_DEFAULT_ZOOM,
+
+          minZoom: 4,
+
+          maxZoom: 22,
+
+          zoomControl: false,
+
+          zoomSnap: 0.5,
+
+          zoomDelta: 1,
+
+          wheelPxPerZoomLevel: 60,
+
+          maxBounds: [
+            [3, 60],
+            [40, 105],
+          ],
+
+          maxBoundsViscosity:
+            0.25,
+        },
+      );
+
+    /*
+     * ========================================================
+     * INITIAL BASE LAYER
+     * ========================================================
+     */
+
+    const tileSource =
+  baseTile === 'fire_heat'
+    ? TILE_SOURCES.fire_base
+    : TILE_SOURCES.satellite;
+
+    const initialTileLayer =
+      L.tileLayer(
+        tileSource.url,
+        {
+          attribution:
+            tileSource.attribution,
+
+          subdomains:
+            tileSource.subdomains ||
+            'abc',
+
+          maxZoom:
+            tileSource.maxZoom,
+
+          maxNativeZoom:
+            tileSource.maxNativeZoom,
+        },
+      ).addTo(map);
+
+    tileLayerRef.current =
+      initialTileLayer;
+
+    /*
+     * ========================================================
+     * FIRE LAYER
+     * ========================================================
+     */
+
+    const initialFireLayer =
+      L.tileLayer(
+        getNASAFireTileUrl(
+          fireLayerDate,
+        ),
+        {
+          opacity: 0.85,
+
+          maxZoom: 18,
+
+          maxNativeZoom: 9,
+
+          attribution:
+            '&copy; NASA GIBS / FIRMS',
+        },
+      );
+
+    fireLayerRef.current =
+      initialFireLayer;
+
+    /*
+     * Fire heat should be visible by default.
+     */
+
+    if (
+      baseTile ===
+      'fire_heat'
+    ) {
+      initialFireLayer.addTo(
+        map,
+      );
+    }
+
+    /*
+     * ========================================================
+     * EVENT LAYERS
+     * ========================================================
+     */
+
+    eventsLayerRef.current =
+      L.layerGroup().addTo(
+        map,
+      );
+
+    buffersLayerRef.current =
+      L.layerGroup().addTo(
+        map,
+      );
+
+    /*
+     * ========================================================
+     * ZOOM TRACKING
+     * ========================================================
+     */
+
+    map.on(
+      'zoomend',
+      () => {
+        setCurrentZoom(
+          Math.round(
+            map.getZoom(),
+          ),
+        );
+      },
+    );
+
+    /*
+     * ========================================================
+     * CURSOR GPS
+     * ========================================================
+     */
+
+    map.on(
+      'mousemove',
+      (e) => {
+        if (
+          !e ||
+          !e.latlng
+        ) {
+          return;
+        }
+
+        const lat =
+          Number(
+            e.latlng.lat,
+          );
+
+        const lng =
+          Number(
+            e.latlng.lng,
+          );
+
+        if (
+          Number.isFinite(
+            lat,
+          ) &&
+          Number.isFinite(
+            lng,
+          )
+        ) {
+          setCursorCoords({
+            lat: Number(
+              lat.toFixed(
+                4,
+              ),
+            ),
+
+            lng: Number(
+              lng.toFixed(
+                4,
+              ),
+            ),
+          });
+        }
+      },
+    );
+
+    mapInstanceRef.current =
+      map;
+
+    /*
+     * ========================================================
+     * INITIAL FIT
+     * ========================================================
+     */
+
+    const coordinates =
+      getValidEventCoordinates();
+
+    if (
+      coordinates.length >
+      0
+    ) {
+      try {
+        const bounds =
+          L.latLngBounds(
+            coordinates,
+          );
+
+        map.fitBounds(
+          bounds,
+          {
+            padding: [
+              50,
+              50,
+            ],
+
+            maxZoom: 8,
+          },
+        );
+      } catch {
+        map.setView(
+          INDIA_CENTER,
+          INDIA_DEFAULT_ZOOM,
+        );
+      }
+    } else {
+      map.fitBounds(
+        INDIA_BOUNDS,
+        {
+          padding: [
+            20,
+            20,
+          ],
+        },
+      );
+    }
+
+    return () => {
+      map.remove();
+
+      mapInstanceRef.current =
+        null;
+
+      tileLayerRef.current =
+        null;
+
+      fireLayerRef.current =
+        null;
+    };
+
+    // Initial setup only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /*
+   * ============================================================
+   * CHANGE BASE MAP
+   * ============================================================
+   *
+   * Satellite
+   * Fire Heat
+   * OSM
+   *
+   * NO GRID
+   */
+
+  useEffect(() => {
+    const map =
+      mapInstanceRef.current;
+
+    if (!map) {
+      return;
+    }
+
+    /*
+     * Remove normal base layer.
+     */
+
+    if (
+      tileLayerRef.current
+    ) {
+      map.removeLayer(
+        tileLayerRef.current,
+      );
+
+      tileLayerRef.current =
+        null;
+    }
+
+    /*
+     * Remove fire layer.
+     */
+
+    if (
+      fireLayerRef.current
+    ) {
+      map.removeLayer(
+        fireLayerRef.current,
+      );
+    }
+
+    /*
+     * ========================================================
+     * SATELLITE
+     * ========================================================
+     */
+
+    if (
+      baseTile ===
+      'satellite'
+    ) {
+      const source =
+        TILE_SOURCES.satellite;
+
+      tileLayerRef.current =
+        L.tileLayer(
+          source.url,
+          {
+            attribution:
+              source.attribution,
+
+            subdomains:
+              source.subdomains ||
+              'abc',
+
+            maxZoom:
+              source.maxZoom,
+
+            maxNativeZoom:
+              source.maxNativeZoom,
+          },
+        ).addTo(map);
+
+      return;
+    }
+
+    /*
+     * ========================================================
+     * OSM
+     * ========================================================
+     */
+
+    if (
+      baseTile ===
+      'osm_standard'
+    ) {
+      const source =
+        TILE_SOURCES.osm_standard;
+
+      tileLayerRef.current =
+        L.tileLayer(
+          source.url,
+          {
+            attribution:
+              source.attribution,
+
+            subdomains:
+              source.subdomains ||
+              'abc',
+
+            maxZoom:
+              source.maxZoom,
+
+            maxNativeZoom:
+              source.maxNativeZoom,
+          },
+        ).addTo(map);
+
+      return;
+    }
+
+    /*
+     * ========================================================
+     * FIRE HEAT
+     * ========================================================
+     *
+     * Keep OSM as the base and put NASA fire anomalies
+     * above it.
+     *
+     * This is better than showing only thermal pixels
+     * because roads/cities remain visible.
+     */
+
+    if (
+      baseTile ===
+      'fire_heat'
+    ) {
+      const source =
+        TILE_SOURCES.fire_base;
+
+      tileLayerRef.current =
+        L.tileLayer(
+          source.url,
+          {
+            attribution:
+              source.attribution,
+
+            subdomains:
+              source.subdomains ||
+              'abc',
+
+            maxZoom:
+              source.maxZoom,
+
+            maxNativeZoom:
+              source.maxNativeZoom,
+          },
+        ).addTo(map);
+
+      const fireLayer =
+        L.tileLayer(
+          getNASAFireTileUrl(
+            fireLayerDate,
+          ),
+          {
+            opacity: 0.88,
+
+            maxZoom: 18,
+
+            maxNativeZoom: 9,
+
+            attribution:
+              '&copy; NASA GIBS / FIRMS',
+          },
+        ).addTo(map);
+
+      fireLayerRef.current =
+        fireLayer;
+    }
+  }, [
+    baseTile,
+    fireLayerDate,
+  ]);
+
+  /*
+   * ============================================================
+   * UPDATE FIRE LAYER DATE
+   * ============================================================
+   */
+
+  useEffect(() => {
+    if (
+      baseTile !==
+      'fire_heat'
+    ) {
+      return;
+    }
+
+    const map =
+      mapInstanceRef.current;
+
+    if (!map) {
+      return;
+    }
+
+    if (
+      fireLayerRef.current
+    ) {
+      map.removeLayer(
+        fireLayerRef.current,
+      );
+    }
+
+    const fireLayer =
+      L.tileLayer(
+        getNASAFireTileUrl(
+          fireLayerDate,
+        ),
+        {
+          opacity: 0.88,
+
+          maxZoom: 18,
+
+          maxNativeZoom: 9,
+
+          attribution:
+            '&copy; NASA GIBS / FIRMS',
+        },
+      ).addTo(map);
+
+    fireLayerRef.current =
+      fireLayer;
+  }, [
+    fireLayerDate,
+    baseTile,
+  ]);
+
+  /*
+   * ============================================================
+   * AUTO FIT EVENTS
+   * ============================================================
+   */
+
+  useEffect(() => {
+    const map =
+      mapInstanceRef.current;
+
+    if (!map) {
+      return;
+    }
+
+    const coordinates =
+      getValidEventCoordinates();
+
+    if (
+      coordinates.length ===
+      0
+    ) {
+      map.fitBounds(
+        INDIA_BOUNDS,
+        {
+          padding: [
+            20,
+            20,
+          ],
+
+          animate: true,
+
+          duration: 0.8,
+        },
+      );
+
+      return;
+    }
+
+    try {
+      const bounds =
+        L.latLngBounds(
+          coordinates,
+        );
+
+      map.fitBounds(
+        bounds,
+        {
+          padding: [
+            60,
+            60,
+          ],
+
+          maxZoom: 8,
+
+          animate: true,
+
+          duration: 0.8,
+        },
+      );
+    } catch {
+      map.fitBounds(
+        INDIA_BOUNDS,
+        {
+          padding: [
+            20,
+            20,
+          ],
+        },
+      );
+    }
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    events.length,
+  ]);
+
+  /*
+   * ============================================================
+   * RENDER EVENT MARKERS
+   * ============================================================
+   */
+
+  useEffect(() => {
+    if (
+      !eventsLayerRef.current ||
+      !buffersLayerRef.current
+    ) {
+      return;
+    }
+
+    eventsLayerRef.current.clearLayers();
+
+    buffersLayerRef.current.clearLayers();
+
+    if (!showEvents) {
+      return;
+    }
+
+    events.forEach(
+      (event) => {
+        if (!event) {
+          return;
+        }
+
+        const eLat =
+          Number(
+            event.lat,
+          );
+
+        const eLng =
+          Number(
+            event.lng,
+          );
+
+        if (
+          !Number.isFinite(
+            eLat,
+          ) ||
+          !Number.isFinite(
+            eLng,
+          )
+        ) {
+          return;
+        }
+
+        const isSelected =
+          selectedEvent?.id ===
+          event.id;
+
+        const style =
+          getPriorityStyle(
+            event.investigationPriority,
+          );
+
+        /*
+         * ======================================================
+         * BUFFER
+         * ======================================================
+         */
+
+        if (
+          showBufferZones
+        ) {
+          const outerCircle =
+            L.circle(
+              [
+                eLat,
+                eLng,
+              ],
+              {
+                radius:
+                  5000,
+
+                color:
+                  style.color,
+
+                weight:
+                  1.2,
+
+                dashArray:
+                  '4, 4',
+
+                fillColor:
+                  style.color,
+
+                fillOpacity:
+                  isSelected
+                    ? 0.16
+                    : 0.05,
+              },
+            );
+
+          const innerCircle =
+            L.circle(
+              [
+                eLat,
+                eLng,
+              ],
+              {
+                radius:
+                  2000,
+
+                color:
+                  style.color,
+
+                weight:
+                  1.8,
+
+                fillColor:
+                  style.color,
+
+                fillOpacity:
+                  isSelected
+                    ? 0.3
+                    : 0.12,
+              },
+            );
+
+          buffersLayerRef.current?.addLayer(
+            outerCircle,
+          );
+
+          buffersLayerRef.current?.addLayer(
+            innerCircle,
+          );
+        }
+
+        /*
+         * ======================================================
+         * EVENT MARKER
+         * ======================================================
+         */
+
+        const pulseSize =
+          isSelected
+            ? 38
+            : 30;
+
+        const eventId =
+          String(
+            event.id,
+          );
+
+        const markerLabel =
+          eventId.replace(
+            'EVT-',
+            '',
+          );
+
+        const markerHtml = `
+          <div
+            style="
+              position:relative;
+              width:${pulseSize}px;
+              height:${pulseSize}px;
+              display:flex;
+              align-items:center;
+              justify-content:center;
+              cursor:pointer;
+            "
+          >
+
+            <div
+              style="
+                position:absolute;
+                inset:0;
+                border-radius:50%;
+                background:${style.glow};
+                animation:veyronix-ping 2s
+                  cubic-bezier(0,0,0.2,1)
+                  infinite;
+              "
+            ></div>
+
+            <div
+              style="
+                position:relative;
+                width:${isSelected ? 24 : 20}px;
+                height:${isSelected ? 24 : 20}px;
+                border-radius:50%;
+                background:${style.color};
+                border:2px solid #ffffff;
+                box-shadow:
+                  0 0 18px ${style.color},
+                  0 2px 8px rgba(0,0,0,0.85);
+                display:flex;
+                align-items:center;
+                justify-content:center;
+                color:#ffffff;
+                font-size:9px;
+                font-weight:900;
+                font-family:'JetBrains Mono',monospace;
+              "
+            >
+              ${markerLabel}
+            </div>
+
+          </div>
+        `;
+
+        const customIcon =
+          L.divIcon({
+            className:
+              `veyronix-event-${eventId}`,
+
+            html:
+              markerHtml,
+
+            iconSize: [
+              pulseSize,
+              pulseSize,
+            ],
+
+            iconAnchor: [
+              pulseSize / 2,
+              pulseSize / 2,
+            ],
+          });
+
+        const eventMarker =
+          L.marker(
+            [
+              eLat,
+              eLng,
+            ],
+            {
+              icon:
+                customIcon,
+            },
+          );
+
+        /*
+         * ======================================================
+         * POPUP DATA
+         * ======================================================
+         */
+
+        const frp =
+          Number(
+            event.frpMw ||
+              0,
+          );
+
+        const brightness =
+          Number(
+            event.brightnessTempK ||
+              0,
+          );
+
+        const distanceKm =
+          Number(
+            event.spatialContext
+              ?.distanceKm ||
+              0,
+          );
+
+        const facilityName =
+          event.spatialContext
+            ?.facilityName ||
+          'nearby location';
+
+        const mlSource =
+          event.likelySource ||
+          'Uncertain';
+
+        const confidence =
+          Number(
+            event.confidence ||
+              0,
+          );
+
+        /*
+         * ======================================================
+         * POPUP
+         * ======================================================
+         */
+
+        const popupHtml = `
+          <div
+            style="
+              font-family:Inter,system-ui,sans-serif;
+              font-size:12px;
+              color:#e2e8f0;
+              min-width:270px;
+              padding:6px;
+              background:#0a0e24;
+              border-radius:10px;
+            "
+          >
+
+            <div
+              style="
+                display:flex;
+                align-items:center;
+                justify-content:space-between;
+                margin-bottom:6px;
+                gap:8px;
+              "
+            >
+
+              <span
+                style="
+                  background:${style.color};
+                  color:#ffffff;
+                  font-size:10px;
+                  font-weight:800;
+                  padding:2px 7px;
+                  border-radius:4px;
+                  font-family:'JetBrains Mono',monospace;
+                "
+              >
+                ${style.label}
+              </span>
+
+              <span
+                style="
+                  font-size:11px;
+                  font-weight:600;
+                  color:#94a3b8;
+                  font-family:'JetBrains Mono',monospace;
+                "
+              >
+                ${eventId}
+              </span>
+
+            </div>
+
+            <h3
+              style="
+                font-size:13.5px;
+                font-weight:700;
+                color:#ffffff;
+                margin:0 0 3px 0;
+                line-height:1.3;
+                font-family:'JetBrains Mono','Inter',monospace;
+              "
+            >
+              ${event.name}
+            </h3>
+
+            <p
+              style="
+                font-size:11px;
+                color:#94a3b8;
+                margin:0 0 8px 0;
+              "
+            >
+              ${
+                event.region ||
+                'Unknown region'
+              },
+              ${
+                event.state ||
+                'Unknown state'
+              }
+            </p>
+
+            <div
+              style="
+                display:grid;
+                grid-template-columns:1fr 1fr;
+                gap:6px;
+                background:#0f1638;
+                border:1px solid #1e295e;
+                border-radius:8px;
+                padding:8px;
+                margin-bottom:8px;
+              "
+            >
+
+              <div>
+                <div
+                  style="
+                    font-size:10px;
+                    color:#94a3b8;
+                  "
+                >
+                  FRP
+                </div>
+
+                <div
+                  style="
+                    font-size:13px;
+                    font-weight:700;
+                    color:#f43f5e;
+                    font-family:'JetBrains Mono',monospace;
+                  "
+                >
+                  ${frp.toFixed(1)} MW
+                </div>
+              </div>
+
+              <div>
+                <div
+                  style="
+                    font-size:10px;
+                    color:#94a3b8;
+                  "
+                >
+                  Brightness
+                </div>
+
+                <div
+                  style="
+                    font-size:13px;
+                    font-weight:700;
+                    color:#38bdf8;
+                    font-family:'JetBrains Mono',monospace;
+                  "
+                >
+                  ${brightness.toFixed(1)} K
+                </div>
+              </div>
+
+              <div>
+                <div
+                  style="
+                    font-size:10px;
+                    color:#94a3b8;
+                  "
+                >
+                  Sensor
+                </div>
+
+                <div
+                  style="
+                    font-size:10px;
+                    font-weight:600;
+                    color:#e2e8f0;
+                    font-family:'JetBrains Mono',monospace;
+                  "
+                >
+                  ${
+                    String(
+                      event.sensor ||
+                      '',
+                    )
+                  }
+                </div>
+              </div>
+
+              <div>
+                <div
+                  style="
+                    font-size:10px;
+                    color:#94a3b8;
+                  "
+                >
+                  ML Attribution
+                </div>
+
+                <div
+                  style="
+                    font-size:10px;
+                    font-weight:700;
+                    color:#10b981;
+                  "
+                >
+                  ${mlSource}
+                </div>
+
+                <div
+                  style="
+                    font-size:9px;
+                    color:#94a3b8;
+                    margin-top:2px;
+                  "
+                >
+                  Confidence:
+                  ${(confidence * 100).toFixed(1)}%
+                </div>
+              </div>
+
+            </div>
+
+            <div
+              style="
+                display:flex;
+                align-items:center;
+                gap:6px;
+                padding:7px 8px;
+                margin-bottom:8px;
+                border-radius:7px;
+                background:rgba(249,115,22,0.10);
+                border:1px solid rgba(249,115,22,0.35);
+                color:#fdba74;
+                font-size:10.5px;
+              "
+            >
+              <span style="font-size:15px;">
+                🔥
+              </span>
+
+              <span>
+                NASA VIIRS thermal anomaly
+              </span>
+            </div>
+
+            <div
+              style="
+                font-size:11px;
+                color:#cbd5e1;
+                margin-bottom:8px;
+                line-height:1.4;
+              "
+            >
+              <strong>
+                Spatial Context:
+              </strong>
+
+              ${distanceKm.toFixed(2)}
+              km from
+              ${facilityName}.
+            </div>
+
+            <button
+              id="veyronix-select-${eventId}"
+              style="
+                width:100%;
+                background:#0284c7;
+                color:#ffffff;
+                border:1px solid #38bdf8;
+                padding:7px 10px;
+                border-radius:6px;
+                font-size:11px;
+                font-weight:700;
+                font-family:'JetBrains Mono',monospace;
+                cursor:pointer;
+              "
+            >
+              Select for Detailed Analysis →
+            </button>
+
+          </div>
+        `;
+
+        eventMarker.bindPopup(
+          popupHtml,
+          {
+            maxWidth: 320,
+          },
+        );
+
+        /*
+         * ======================================================
+         * MARKER CLICK
+         * ======================================================
+         */
+
+        eventMarker.on(
+          'click',
+          () => {
+            setShowEventCard(
+              true,
+            );
+
+            onSelectEvent(
+              event,
+            );
+          },
+        );
+
+        /*
+         * ======================================================
+         * POPUP BUTTON
+         * ======================================================
+         */
+
+        eventMarker.on(
+          'popupopen',
+          () => {
+            const button =
+              document.getElementById(
+                `veyronix-select-${eventId}`,
+              );
+
+            if (button) {
+              button.onclick =
+                () => {
+                  setShowEventCard(
+                    true,
+                  );
+
+                  onSelectEvent(
+                    event,
+                  );
+                };
+            }
+          },
+        );
+
+        eventsLayerRef.current?.addLayer(
+          eventMarker,
+        );
+      },
+    );
+  }, [
+    events,
+    selectedEvent,
+    showEvents,
+    showBufferZones,
+    onSelectEvent,
+  ]);
+
+  /*
+   * ============================================================
+   * FLY TO SELECTED EVENT
+   * ============================================================
+   */
+
+  useEffect(() => {
+    const map =
+      mapInstanceRef.current;
+
+    if (
+      !map ||
+      !selectedEvent
+    ) {
+      return;
+    }
+
+    const lat =
+      Number(
+        selectedEvent.lat,
+      );
+
+    const lng =
+      Number(
+        selectedEvent.lng,
+      );
+
+    if (
+      !Number.isFinite(
+        lat,
+      ) ||
+      !Number.isFinite(
+        lng,
+      )
+    ) {
+      return;
+    }
+
+    setShowEventCard(
+      true,
+    );
+
+    try {
+      map.flyTo(
+        [
+          lat,
+          lng,
+        ],
+        13,
+        {
+          duration:
+            1.2,
+
+          easeLinearity:
+            0.25,
+        },
+      );
+    } catch {
+      // Ignore.
+    }
+  }, [
+    selectedEvent,
+  ]);
+
+  /*
+   * ============================================================
+   * RESET INDIA
+   * ============================================================
+   */
+
+  const handleResetToIndia =
+    () => {
+      const map =
+        mapInstanceRef.current;
+
+      if (!map) {
+        return;
+      }
+
+      try {
+        map.fitBounds(
+          INDIA_BOUNDS,
+          {
+            padding: [
+              20,
+              20,
+            ],
+
+            duration: 1,
+          },
+        );
+      } catch {
+        map.setView(
+          INDIA_CENTER,
+          INDIA_DEFAULT_ZOOM,
+        );
+      }
+    };
+
+  /*
+   * ============================================================
+   * ZOOM
+   * ============================================================
+   */
+
+  const handleZoomIn =
+    () => {
+      mapInstanceRef.current?.zoomIn(
+        1,
+      );
+    };
+
+  const handleZoomOut =
+    () => {
+      mapInstanceRef.current?.zoomOut(
+        1,
+      );
+    };
+
+  /*
+   * ============================================================
+   * ZOOM SELECTED EVENT
+   * ============================================================
+   */
+
+  const handleUltraZoomOnTarget =
+    () => {
+      const map =
+        mapInstanceRef.current;
+
+      if (
+        !map ||
+        !selectedEvent
+      ) {
+        return;
+      }
+
+      const lat =
+        Number(
+          selectedEvent.lat,
+        );
+
+      const lng =
+        Number(
+          selectedEvent.lng,
+        );
+
+      if (
+        !Number.isFinite(
+          lat,
+        ) ||
+        !Number.isFinite(
+          lng,
+        )
+      ) {
+        return;
+      }
+
+      try {
+        map.flyTo(
+          [
+            lat,
+            lng,
+          ],
+          18,
+          {
+            duration: 1,
+          },
+        );
+      } catch {
+        // Ignore.
+      }
+    };
+
+  /*
+   * ============================================================
+   * RENDER
+   * ============================================================
+   */
+
+  return (
+    <>
+      <style>
+        {`
+          @keyframes veyronix-ping {
+            0% {
+              transform: scale(0.85);
+              opacity: 0.85;
+            }
+
+            70% {
+              transform: scale(1.45);
+              opacity: 0;
+            }
+
+            100% {
+              transform: scale(1.45);
+              opacity: 0;
+            }
+          }
+
+          .veyronix-map-container
+            .leaflet-popup-content-wrapper {
+            background:#080d24;
+            color:#e2e8f0;
+            border:1px solid #26366f;
+            border-radius:12px;
+            box-shadow:
+              0 12px 35px rgba(0,0,0,0.55);
+          }
+
+          .veyronix-map-container
+            .leaflet-popup-tip {
+            background:#080d24;
+          }
+
+          .veyronix-map-container
+            .leaflet-popup-close-button {
+            color:#94a3b8 !important;
+          }
+
+          .veyronix-map-container
+            .leaflet-control-attribution {
+            background:rgba(5,8,22,0.82) !important;
+            color:#94a3b8 !important;
+            font-size:9px !important;
+          }
+
+          .veyronix-map-container
+            .leaflet-control-attribution a {
+            color:#38bdf8 !important;
+          }
+
+          .veyronix-map-container
+            .leaflet-control-container {
+            z-index:20;
+          }
+        `}
+      </style>
+
+      <div
+        className={
+          isFullscreen
+            ? `
+              fixed
+              inset-0
+              z-[999999]
+              w-full
+              h-full
+              max-w-[100vw]
+              max-h-[100vh]
+              bg-[#050816]
+              flex
+              flex-col
+              overflow-hidden
+              m-0
+              p-0
+              rounded-none
+              border-0
+            `
+            : `
+              relative
+              flex
+              flex-col
+              bg-[#0b102c]
+              rounded-2xl
+              border
+              border-[#1e2a60]
+              overflow-hidden
+              shadow-2xl
+              h-[520px]
+              w-full
+            `
+        }
+      >
+
+        {/* ====================================================
+            HEADER
+        ==================================================== */}
+
+        <div
+          className="
+            flex
+            items-center
+            justify-between
+            px-3
+            sm:px-4
+            py-2.5
+            bg-[#080c22]
+            border-b
+            border-[#1b2554]
+            flex-wrap
+            gap-2
+            z-10
+            shrink-0
+          "
+        >
+
+          <div
+            className="
+              flex
+              items-center
+              gap-2
+              min-w-0
+            "
+          >
+
+            <div
+              className="
+                flex
+                items-center
+                gap-1.5
+                px-2.5
+                py-1
+                rounded-lg
+                bg-cyan-950/40
+                border
+                border-cyan-500/40
+                text-xs
+                font-semibold
+                text-cyan-300
+                whitespace-nowrap
+              "
+            >
+
+              <Compass
+                className="
+                  w-3.5
+                  h-3.5
+                  text-cyan-400
+                "
+              />
+
+              <span>
+                INDIA GEOSPATIAL GIS
+              </span>
+
+            </div>
+
+            <span
+              className="
+                text-[11px]
+                text-slate-400
+                hidden
+                lg:inline
+                font-mono
+                truncate
+              "
+            >
+              NASA FIRMS VIIRS •
+              MODIS 1km •
+              VEYRONIX ML Attribution •
+              Deep Zoom Level{' '}
+              {currentZoom}/22
+            </span>
+
+          </div>
+
+          {/* ==================================================
+              CONTROLS
+          ================================================== */}
+
+          <div
+            className="
+              flex
+              items-center
+              gap-1.5
+              sm:gap-2
+              flex-wrap
+            "
+          >
+
+            {/* =================================================
+                BASE MAP
+                GRID REMOVED
+                OLD THERMAL REMOVED
+            ================================================= */}
+
+            <div
+              className="
+                flex
+                items-center
+                bg-[#0d1438]
+                border
+                border-[#1e2c69]
+                rounded-lg
+                p-0.5
+                text-xs
+              "
+            >
+
+              {/* SATELLITE */}
+
+              <button
+                type="button"
+                onClick={() =>
+                  setBaseTile(
+                    'satellite',
+                  )
+                }
+                className={`
+                  px-2
+                  py-1
+                  rounded-md
+                  text-[11px]
+                  font-medium
+                  ${
+                    baseTile ===
+                    'satellite'
+                      ? `
+                        bg-cyan-500
+                        text-slate-950
+                        font-bold
+                      `
+                      : 'text-slate-300'
+                  }
+                `}
+              >
+                Satellite
+              </button>
+
+              {/* FIRE HEAT */}
+
+              <button
+                type="button"
+                onClick={() =>
+                  setBaseTile(
+                    'fire_heat',
+                  )
+                }
+                className={`
+                  px-2
+                  py-1
+                  rounded-md
+                  text-[11px]
+                  font-medium
+                  flex
+                  items-center
+                  gap-1
+                  ${
+                    baseTile ===
+                    'fire_heat'
+                      ? `
+                        bg-orange-500
+                        text-white
+                        font-bold
+                      `
+                      : 'text-slate-300'
+                  }
+                `}
+              >
+
+                <Flame
+                  className="
+                    w-3
+                    h-3
+                  "
+                />
+
+                Fire Heat
+              </button>
+
+              {/* OSM */}
+
+              <button
+                type="button"
+                onClick={() =>
+                  setBaseTile(
+                    'osm_standard',
+                  )
+                }
+                className={`
+                  px-2
+                  py-1
+                  rounded-md
+                  text-[11px]
+                  font-medium
+                  ${
+                    baseTile ===
+                    'osm_standard'
+                      ? `
+                        bg-cyan-500
+                        text-slate-950
+                        font-bold
+                      `
+                      : 'text-slate-300'
+                  }
+                `}
+              >
+                OSM
+              </button>
+
+            </div>
+
+            {/* =================================================
+                EVENTS
+            ================================================= */}
+
+            <button
+              type="button"
+              onClick={() =>
+                setShowEvents(
+                  (
+                    value,
+                  ) =>
+                    !value,
+                )
+              }
+              className={`
+                px-2.5
+                py-1
+                text-[11px]
+                font-mono
+                rounded-lg
+                border
+                flex
+                items-center
+                gap-1.5
+                ${
+                  showEvents
+                    ? `
+                      bg-cyan-500/20
+                      border-cyan-400/70
+                      text-cyan-300
+                    `
+                    : `
+                      bg-[#0d1438]
+                      border-[#1e2c69]
+                      text-slate-400
+                    `
+                }
+              `}
+            >
+
+              <RadioTower
+                className="
+                  w-3.5
+                  h-3.5
+                  text-cyan-400
+                "
+              />
+
+              <span>
+                Events ({events.length})
+              </span>
+
+            </button>
+
+            {/* =================================================
+                BUFFERS
+            ================================================= */}
+
+            <button
+              type="button"
+              onClick={() =>
+                setShowBufferZones(
+                  (
+                    value,
+                  ) =>
+                    !value,
+                )
+              }
+              className={`
+                px-2
+                py-1
+                text-[11px]
+                rounded-lg
+                border
+                ${
+                  showBufferZones
+                    ? `
+                      bg-purple-500/20
+                      border-purple-500/60
+                      text-purple-300
+                    `
+                    : `
+                      bg-[#0d1438]
+                      border-[#1e2c69]
+                      text-slate-400
+                    `
+                }
+              `}
+            >
+              Buffers
+            </button>
+
+            {/* =================================================
+                RESET
+            ================================================= */}
+
+            <button
+              type="button"
+              onClick={
+                handleResetToIndia
+              }
+              className="
+                p-1.5
+                rounded-lg
+                bg-[#0d1438]
+                border
+                border-[#1e2c69]
+                text-slate-300
+                hover:text-white
+              "
+              title="Reset to India"
+            >
+
+              <RotateCcw
+                className="
+                  w-3.5
+                  h-3.5
+                "
+              />
+
+            </button>
+
+            {/* =================================================
+                FULLSCREEN
+            ================================================= */}
+
+            {!isFullscreen && (
+              <button
+                type="button"
+                onClick={() =>
+                  setIsFullscreen(
+                    true,
+                  )
+                }
+                className="
+                  p-2
+                  rounded-xl
+                  bg-cyan-500/20
+                  border
+                  border-cyan-400/80
+                  text-cyan-300
+                "
+                title="Full Size Map"
+              >
+
+                <Maximize2
+                  className="
+                    w-4
+                    h-4
+                  "
+                />
+
+              </button>
+            )}
+
+          </div>
+        </div>
+
+        {/* ====================================================
+            MAP
+        ==================================================== */}
+
+        <div
+          className="
+            veyronix-map-container
+            relative
+            flex-1
+            w-full
+            h-full
+            bg-[#050816]
+            overflow-hidden
+          "
+        >
+
+          <div
+            ref={
+              mapContainerRef
+            }
+            className="
+              absolute
+              inset-0
+              w-full
+              h-full
+              z-0
+            "
+          />
+
+          {/* ==================================================
+              FULLSCREEN BUTTON
+          ================================================== */}
+
+          {!isFullscreen && (
+            <button
+              type="button"
+              onClick={() =>
+                setIsFullscreen(
+                  true,
+                )
+              }
+              className="
+                absolute
+                top-3
+                right-3
+                z-20
+                p-2.5
+                rounded-xl
+                bg-[#080c24]/90
+                border
+                border-cyan-400/80
+                text-cyan-300
+              "
+              title="Expand map"
+            >
+
+              <Expand
+                className="
+                  w-5
+                  h-5
+                "
+              />
+
+            </button>
+          )}
+
+          {/* ==================================================
+              CLOSE FULLSCREEN
+          ================================================== */}
+
+          {isFullscreen && (
+            <button
+              type="button"
+              onClick={() =>
+                setIsFullscreen(
+                  false,
+                )
+              }
+              className="
+                absolute
+                top-3.5
+                right-3.5
+                z-[9999999]
+                w-10
+                h-10
+                rounded-full
+                bg-[#070b20]/90
+                border-2
+                border-cyan-400/80
+                text-cyan-300
+                flex
+                items-center
+                justify-center
+              "
+              title="Close Fullscreen"
+            >
+
+              <X
+                className="
+                  w-5
+                  h-5
+                "
+              />
+
+            </button>
+          )}
+
+          {/* ==================================================
+              ZOOM CONTROLS
+          ================================================== */}
+
+          <div
+            className="
+              absolute
+              top-3
+              left-3
+              z-10
+              flex
+              flex-col
+              gap-1.5
+            "
+          >
+
+            <button
+              type="button"
+              onClick={
+                handleZoomIn
+              }
+              className="
+                w-9
+                h-9
+                rounded-xl
+                bg-[#0a0f2c]/95
+                border
+                border-cyan-500/50
+                text-slate-200
+                flex
+                items-center
+                justify-center
+              "
+              title="Zoom In"
+            >
+
+              <ZoomIn
+                className="
+                  w-4
+                  h-4
+                "
+              />
+
+            </button>
+
+            <button
+              type="button"
+              onClick={
+                handleZoomOut
+              }
+              className="
+                w-9
+                h-9
+                rounded-xl
+                bg-[#0a0f2c]/95
+                border
+                border-cyan-500/50
+                text-slate-200
+                flex
+                items-center
+                justify-center
+              "
+              title="Zoom Out"
+            >
+
+              <ZoomOut
+                className="
+                  w-4
+                  h-4
+                "
+              />
+
+            </button>
+
+            <button
+              type="button"
+              onClick={
+                handleUltraZoomOnTarget
+              }
+              className="
+                w-9
+                h-9
+                rounded-xl
+                bg-[#0a0f2c]/95
+                border
+                border-red-500/70
+                text-red-400
+                flex
+                items-center
+                justify-center
+              "
+              title="Zoom to selected event"
+            >
+
+              <Eye
+                className="
+                  w-4
+                  h-4
+                "
+              />
+
+            </button>
+
+            <button
+              type="button"
+              onClick={
+                handleResetToIndia
+              }
+              className="
+                w-9
+                h-9
+                rounded-xl
+                bg-[#0a0f2c]/95
+                border
+                border-cyan-500/70
+                text-cyan-400
+                flex
+                items-center
+                justify-center
+              "
+              title="Reset to India"
+            >
+
+              <Navigation
+                className="
+                  w-4
+                  h-4
+                "
+              />
+
+            </button>
+
+          </div>
+
+          {/* ==================================================
+              FIRE LAYER INFO
+          ================================================== */}
+
+          {baseTile ===
+            'fire_heat' && (
+            <div
+              className="
+                absolute
+                top-3
+                left-1/2
+                -translate-x-1/2
+                z-20
+                px-3
+                py-1.5
+                rounded-lg
+                bg-[#080d24]/90
+                backdrop-blur-md
+                border
+                border-orange-500/50
+                text-orange-300
+                text-[10px]
+                font-mono
+                shadow-xl
+                flex
+                items-center
+                gap-1.5
+              "
+            >
+
+              <Flame
+                className="
+                  w-3.5
+                  h-3.5
+                  text-orange-400
+                "
+              />
+
+              <span>
+                NASA VIIRS THERMAL
+                • {fireLayerDate}
+              </span>
+
+            </div>
+          )}
+
+          {/* ==================================================
+              ANALYZING
+          ================================================== */}
+
+          {isAnalyzing && (
+            <div
+              className="
+                absolute
+                top-12
+                left-1/2
+                -translate-x-1/2
+                z-20
+                px-3
+                py-1.5
+                rounded-lg
+                bg-cyan-950/90
+                border
+                border-cyan-400/60
+                text-cyan-300
+                text-[11px]
+                font-mono
+                shadow-xl
+              "
+            >
+              VEYRONIX AI ANALYZING EVENT...
+            </div>
+          )}
+
+          {/* ==================================================
+              SELECTED EVENT CARD
+          ================================================== */}
+
+          {showEventCard &&
+            selectedEvent &&
+            Number.isFinite(
+              Number(
+                selectedEvent.lat,
+              ),
+            ) &&
+            Number.isFinite(
+              Number(
+                selectedEvent.lng,
+              ),
+            ) && (
+              <div
+                className={`
+                  absolute
+                  z-10
+                  w-[280px]
+                  sm:w-[320px]
+                  bg-[#090e28]/95
+                  backdrop-blur-md
+                  border
+                  border-[#1e2b66]
+                  rounded-xl
+                  p-3
+                  shadow-2xl
+                  text-xs
+                  ${
+                    isFullscreen
+                      ? 'bottom-14 left-4'
+                      : 'bottom-14 right-3'
+                  }
+                `}
+              >
+
+                <div
+                  className="
+                    flex
+                    items-center
+                    justify-between
+                    gap-2
+                    pb-1.5
+                    border-b
+                    border-[#1b2554]
+                  "
+                >
+
+                  <div
+                    className="
+                      flex
+                      items-center
+                      gap-1.5
+                      min-w-0
+                    "
+                  >
+
+                    <span
+                      className="
+                        font-bold
+                        text-white
+                        truncate
+                        text-xs
+                      "
+                    >
+                      {
+                        selectedEvent.name
+                      }
+                    </span>
+
+                    <span
+                      className="
+                        px-1.5
+                        py-0.5
+                        rounded
+                        text-[10px]
+                        font-bold
+                        bg-red-500/30
+                        border
+                        border-red-500
+                        text-red-300
+                      "
+                    >
+                      {typeof selectedEvent.frpMw ===
+                      'number'
+                        ? selectedEvent.frpMw.toFixed(
+                            0,
+                          )
+                        : '0'}{' '}
+                      MW
+                    </span>
+
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setShowEventCard(
+                        false,
+                      )
+                    }
+                    className="
+                      p-1
+                      rounded-md
+                      text-slate-400
+                      hover:text-white
+                    "
+                    title="Close target box"
+                  >
+
+                    <X
+                      className="
+                        w-3.5
+                        h-3.5
+                      "
+                    />
+
+                  </button>
+
+                </div>
+
+                <div
+                  className="
+                    grid
+                    grid-cols-2
+                    gap-x-2
+                    gap-y-1
+                    pt-1.5
+                    text-[11px]
+                  "
+                >
+
+                  <span className="text-slate-400">
+                    Coordinates:
+                  </span>
+
+                  <span
+                    className="
+                      font-mono
+                      text-right
+                      text-cyan-300
+                    "
+                  >
+                    {Number(
+                      selectedEvent.lat,
+                    ).toFixed(
+                      3,
+                    )}
+                    °N,{' '}
+                    {Number(
+                      selectedEvent.lng,
+                    ).toFixed(
+                      3,
+                    )}
+                    °E
+                  </span>
+
+                  <span className="text-slate-400">
+                    ML Attribution:
+                  </span>
+
+                  <span
+                    className="
+                      font-semibold
+                      text-right
+                      text-emerald-400
+                      truncate
+                    "
+                  >
+                    {
+                      selectedEvent.likelySource ||
+                      'Uncertain'
+                    }
+                  </span>
+
+                  <span className="text-slate-400">
+                    Region:
+                  </span>
+
+                  <span
+                    className="
+                      font-medium
+                      text-right
+                      text-slate-200
+                      truncate
+                    "
+                  >
+                    {
+                      selectedEvent.region ||
+                      'India'
+                    }
+                  </span>
+
+                  <span className="text-slate-400">
+                    Event ID:
+                  </span>
+
+                  <span
+                    className="
+                      font-mono
+                      text-right
+                      text-slate-300
+                    "
+                  >
+                    {
+                      selectedEvent.id
+                    }
+                  </span>
+
+                  <span className="text-slate-400">
+                    Fire Layer:
+                  </span>
+
+                  <span
+                    className="
+                      font-mono
+                      text-right
+                      text-orange-300
+                    "
+                  >
+                    VIIRS 375m
+                  </span>
+
+                </div>
+              </div>
+            )}
+
+          {/* ==================================================
+              REOPEN EVENT CARD
+          ================================================== */}
+
+          {!showEventCard &&
+            selectedEvent && (
+              <button
+                type="button"
+                onClick={() =>
+                  setShowEventCard(
+                    true,
+                  )
+                }
+                className={`
+                  absolute
+                  z-10
+                  px-3
+                  py-1.5
+                  rounded-xl
+                  bg-[#090e28]/95
+                  border
+                  border-cyan-500/60
+                  text-cyan-300
+                  text-xs
+                  font-mono
+                  flex
+                  items-center
+                  gap-1.5
+                  ${
+                    isFullscreen
+                      ? 'bottom-14 left-4'
+                      : 'bottom-14 right-3'
+                  }
+                `}
+              >
+
+                <Eye
+                  className="
+                    w-3.5
+                    h-3.5
+                    text-cyan-400
+                  "
+                />
+
+                <span>
+                  Target Details (
+                  {
+                    selectedEvent.id
+                  }
+                  )
+                </span>
+
+              </button>
+            )}
+
+          {/* ==================================================
+              TELEMETRY BAR
+          ================================================== */}
+
+          {showTelemetryBar ? (
+            <div
+              className="
+                absolute
+                bottom-2
+                left-3
+                right-3
+                z-10
+                flex
+                items-center
+                justify-between
+                bg-[#080d24]/95
+                backdrop-blur-md
+                border
+                border-[#1c275a]
+                rounded-lg
+                px-2.5
+                sm:px-3
+                py-1.5
+                text-[11px]
+                text-slate-300
+                shadow-xl
+                overflow-hidden
+                gap-2
+              "
+            >
+
+              <div
+                className="
+                  flex
+                  items-center
+                  gap-2
+                  sm:gap-3
+                  min-w-0
+                "
+              >
+
+                <div
+                  className="
+                    flex
+                    items-center
+                    gap-1
+                    font-mono
+                    text-cyan-300
+                    whitespace-nowrap
+                  "
+                >
+
+                  <MapPin
+                    className="
+                      w-3.5
+                      h-3.5
+                      text-cyan-400
+                    "
+                  />
+
+                  <span>
+                    {cursorCoords
+                      ? `${cursorCoords.lat}° N, ${cursorCoords.lng}° E`
+                      : 'Hover map for GPS'}
+                  </span>
+
+                </div>
+
+                <span
+                  className="
+                    text-[#1c275a]
+                    hidden
+                    sm:inline
+                  "
+                >
+                  |
+                </span>
+
+                <div
+                  className="
+                    hidden
+                    md:flex
+                    items-center
+                    gap-1.5
+                    whitespace-nowrap
+                  "
+                >
+
+                  <span
+                    className="
+                      w-2
+                      h-2
+                      rounded-full
+                      bg-emerald-400
+                      animate-pulse
+                    "
+                  />
+
+                  <span
+                    className="
+                      text-emerald-300
+                      font-mono
+                      text-[10.5px]
+                    "
+                  >
+                    INDIA SATELLITE
+                    TELEMETRY
+                  </span>
+
+                </div>
+
+              </div>
+
+              <div
+                className="
+                  flex
+                  items-center
+                  gap-1.5
+                  sm:gap-2
+                  text-[10px]
+                  font-mono
+                  shrink-0
+                "
+              >
+
+                <span
+                  className="
+                    px-2
+                    py-0.5
+                    rounded
+                    bg-[#0d1438]
+                    border
+                    border-[#1e2a60]
+                    text-slate-300
+                  "
+                >
+                  Zoom:
+                  Level{' '}
+                  {currentZoom}/22
+                </span>
+
+                <span
+                  className="
+                    px-2
+                    py-0.5
+                    rounded
+                    bg-[#0d1438]
+                    border
+                    border-orange-500/40
+                    text-orange-300
+                    hidden
+                    sm:inline
+                  "
+                >
+                  VIIRS 375m
+                </span>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setShowTelemetryBar(
+                      false,
+                    )
+                  }
+                  className="
+                    p-1
+                    rounded
+                    text-slate-400
+                    hover:text-white
+                  "
+                  title="Close telemetry"
+                >
+
+                  <X
+                    className="
+                      w-3.5
+                      h-3.5
+                    "
+                  />
+
+                </button>
+
+              </div>
+
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() =>
+                setShowTelemetryBar(
+                  true,
+                )
+              }
+              className="
+                absolute
+                bottom-2
+                left-3
+                z-10
+                px-2.5
+                py-1
+                rounded-lg
+                bg-[#080d24]/90
+                border
+                border-cyan-500/50
+                text-cyan-300
+                text-[10.5px]
+                font-mono
+                flex
+                items-center
+                gap-1.5
+              "
+            >
+
+              <MapPin
+                className="
+                  w-3
+                  h-3
+                "
+              />
+
+              <span>
+                Show Telemetry
+              </span>
+
+            </button>
+          )}
+
+        </div>
+      </div>
+    </>
+  );
+};
+
+export default IndiaMapVisualization;
+
+
+veyroni api - 
+import type {
+  AnalysisResponse,
+  ThermalEvent,
+} from '../types';
+
+export const API_BASE_URL =
+  'https://veyronix.onrender.com';
+
+export interface VeyronixEventsResponse {
+  status?: string;
+  count?: number;
+  events: Array<Record<string, unknown>>;
+}
+
+function num(
+  value: unknown,
+  fallback = 0,
+): number {
+  const n = Number(value);
+
+  return Number.isFinite(n)
+    ? n
+    : fallback;
+}
+
+function str(
+  value: unknown,
+  fallback = '',
+): string {
+  return (
+    typeof value === 'string' &&
+    value.trim()
+  )
+    ? value
+    : fallback;
+}
+
+function clamp(
+  value: number,
+  min: number,
+  max: number,
+): number {
+  return Math.max(
+    min,
+    Math.min(max, value),
+  );
+}
+
+function getProbabilities(
+  raw: Record<string, unknown>,
+) {
+  const p = (
+    raw.probabilities ??
+    raw.source_probabilities ??
+    {}
+  ) as Record<string, unknown>;
+
+  return {
+    industrial: num(
+      p.Industrial ??
+      p.industrial,
+    ),
+
+    agricultural: num(
+      p.Agriculture_Biomass ??
+      p.agricultural,
+    ),
+
+    vegetation: num(
+      p.Forest_Natural ??
+      p.vegetation,
+    ),
+
+    other: num(
+      p.Waste_Other ??
+      p.other,
+    ),
+  };
+}
+
+function priorityFromScore(
+  score: number,
+): ThermalEvent['investigationPriority'] {
+  if (score >= 85) {
+    return 'CRITICAL';
+  }
+
+  if (score >= 70) {
+    return 'HIGH';
+  }
+
+  if (score >= 50) {
+    return 'MEDIUM';
+  }
+
+  return 'LOW';
+}
+
+function abnormalityFromEvent(
+  raw: Record<string, unknown>,
+): ThermalEvent['abnormality'] {
+  const anomaly = Boolean(
+    raw.is_anomaly ??
+    raw.anomaly ??
+    false,
+  );
+
+  return anomaly
+    ? 'HIGH'
+    : 'LOW';
+}
+
+function mapEvent(
+  raw: Record<string, unknown>,
+): ThermalEvent {
+  const id = String(
+    raw.event_id ??
+    raw.id ??
+    '',
+  );
+
+  const lat = num(
+    raw.latitude ??
+    raw.lat,
+  );
+
+  const lng = num(
+    raw.longitude ??
+    raw.lng,
+  );
+
+  const source = str(
+    raw.predicted_source ??
+    raw.source,
+    'Uncertain',
+  );
+
+  const confidence = clamp(
+    num(raw.confidence),
+    0,
+    1,
+  );
+
+  const priorityScore =
+    Math.round(
+      confidence * 100,
+    );
+
+  const peakFrp = num(
+    raw.peak_frp ??
+    raw.mean_frp,
+  );
+
+  const meanBrightness = num(
+    raw.mean_brightness,
+  );
+
+  const observationCount = num(
+    raw.observation_count,
+  );
+
+  const isAnomaly = Boolean(
+    raw.is_anomaly ??
+    false,
+  );
+
+  const anomalyScore = clamp(
+    num(raw.anomaly_score) * 100,
+    0,
+    100,
+  );
+
+  const eventDate = str(
+    raw.event_date ??
+    raw.start_time,
+    'Unknown',
+  );
+
+  return {
+    id,
+
+    name:
+      `Thermal Event ${id}`,
+
+    region:
+      'Satellite-detected area',
+
+    state:
+      'India',
+
+    lat,
+
+    lng,
+
+    mapX: 50,
+
+    mapY: 50,
+
+    frpMw:
+      peakFrp,
+
+    brightnessTempK:
+      meanBrightness,
+
+    detectionTimeUtc:
+      eventDate,
+
+    detectionTimeIst:
+      eventDate,
+
+    sensor: str(
+      raw.satellite,
+      'NASA FIRMS',
+    ),
+
+    abnormality:
+      abnormalityFromEvent(raw),
+
+    abnormalityScore:
+      anomalyScore,
+
+    likelySource:
+      source,
+
+    investigationPriority:
+      priorityFromScore(
+        priorityScore,
+      ),
+
+    priorityScore,
+
+    confidence,
+
+    insufficientEvidence:
+      source === 'Uncertain',
+
+    message:
+      source === 'Uncertain'
+        ? 'Evidence insufficient for reliable attribution.'
+        : undefined,
+
+    evidence: [
+      `NASA FIRMS thermal event detected at ${lat.toFixed(4)}, ${lng.toFixed(4)}`,
+
+      `FRP: ${peakFrp.toFixed(1)} MW`,
+
+      `Observations: ${observationCount}`,
+
+      isAnomaly
+        ? 'Thermal behaviour flagged as anomalous by the VEYRONIX anomaly model.'
+        : 'Thermal behaviour was not flagged as anomalous.',
+
+      source === 'Uncertain'
+        ? 'Source attribution requires additional evidence.'
+        : `VEYRONIX ML source prediction: ${source}`,
+    ],
+
+    spatialContext: {
+      distanceKm: 0,
+
+      bufferRadiusKm: 0.375,
+
+      nearbyFacilitiesCount: 0,
+
+      landUseClassification:
+        'Not yet matched',
+    },
+
+    sourceProbabilities:
+      getProbabilities(raw),
+
+    contextCards: {
+      localHistory: {
+        title:
+          'Local history',
+
+        description:
+          'Historical context supplied by VEYRONIX.',
+
+        status:
+          'inconclusive',
+
+        tag:
+          'API',
+      },
+
+      eventBehaviour: {
+        title:
+          'Event behaviour',
+
+        description:
+          'Thermal-event behaviour from the VEYRONIX event record.',
+
+        status:
+          isAnomaly
+            ? 'verified'
+            : 'caution',
+
+        tag:
+          isAnomaly
+            ? 'ANOMALOUS'
+            : 'NORMAL',
+      },
+
+      infrastructure: {
+        title:
+          'Infrastructure',
+
+        description:
+          'OSM facility matching is evaluated separately.',
+
+        status:
+          'inconclusive',
+
+        tag:
+          'PENDING',
+      },
+
+      regionalContext: {
+        title:
+          'Regional context',
+
+        description:
+          'Regional contextual evidence is evaluated separately.',
+
+        status:
+          'inconclusive',
+
+        tag:
+          'PENDING',
+      },
+    },
+  };
+}
+
+/* =========================================================
+   GET INITIAL EVENTS
+   ========================================================= */
+
+export async function fetchVeyronixEvents(
+  limit = 100,
+): Promise<ThermalEvent[]> {
+  const response =
+    await fetch(
+      `${API_BASE_URL}/events?limit=${limit}`,
+    );
+
+  if (!response.ok) {
+    throw new Error(
+      `VEYRONIX events API failed: HTTP ${response.status}`,
+    );
+  }
+
+  const data =
+    (await response.json()) as
+      VeyronixEventsResponse;
+
+  if (
+    !Array.isArray(data.events)
+  ) {
+    throw new Error(
+      'VEYRONIX API returned an invalid events response.',
+    );
+  }
+
+  return data.events.map(
+    mapEvent,
+  );
+}
+
+/* =========================================================
+   GET ONE EVENT DIRECTLY FROM FULL CORPUS
+   ========================================================= */
+
+export async function fetchVeyronixEventById(
+  eventId: string,
+): Promise<ThermalEvent> {
+  const cleanEventId =
+    String(eventId).trim();
+
+  if (!cleanEventId) {
+    throw new Error(
+      'Event ID is required.',
+    );
+  }
+
+  const response =
+    await fetch(
+      `${API_BASE_URL}/events/${encodeURIComponent(cleanEventId)}`,
+    );
+
+  if (!response.ok) {
+    if (response.status === 404) {
+      throw new Error(
+        `Event ${cleanEventId} was not found in the VEYRONIX corpus.`,
+      );
+    }
+
+    throw new Error(
+      `VEYRONIX event lookup failed: HTTP ${response.status}`,
+    );
+  }
+
+  const data =
+    (await response.json()) as
+      Record<string, unknown>;
+
+  const rawEvent =
+    data.event &&
+    typeof data.event === 'object'
+      ? (
+          data.event as
+            Record<string, unknown>
+        )
+      : data;
+
+  return mapEvent(
+    rawEvent,
+  );
+}
+
+/* =========================================================
+   GET EVENT ANALYSIS
+   ========================================================= */
+
+export async function fetchVeyronixAnalysis(
+  eventId: string,
+): Promise<AnalysisResponse> {
+  const response =
+    await fetch(
+      `${API_BASE_URL}/event-analysis/${encodeURIComponent(eventId)}`,
+    );
+
+  if (!response.ok) {
+    throw new Error(
+      `VEYRONIX analysis API failed: HTTP ${response.status}`,
+    );
+  }
+
+  return (
+    await response.json()
+  ) as AnalysisResponse;
+}
+
+/* =========================================================
+   RUN ML PREDICTION FOR ONE EVENT
+   ========================================================= */
+
+export async function predictVeyronixEvent(
+  eventId: string,
+): Promise<Record<string, unknown>> {
+  const response =
+    await fetch(
+      `${API_BASE_URL}/predict-event`,
+      {
+        method: 'POST',
+
+        headers: {
+          'Content-Type':
+            'application/json',
+        },
+
+        body: JSON.stringify({
+          event_id:
+            Number(eventId),
+        }),
+      },
+    );
+
+  if (!response.ok) {
+    throw new Error(
+      `VEYRONIX prediction API failed: HTTP ${response.status}`,
+    );
+  }
+
+  return (
+    await response.json()
+  ) as Record<
+    string,
+    unknown
+  >;
+}
+
+/* =========================================================
+   HEALTH CHECK
+   ========================================================= */
+
+export async function checkVeyronixHealth(): Promise<boolean> {
+  try {
+    const response =
+      await fetch(
+        `${API_BASE_URL}/health`,
+      );
+
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+
+InvestigationPage 2 -
+
+import React, { useEffect, useMemo, useState } from 'react';
+import {
+  ShieldAlert,
+  CheckCircle2,
+  AlertTriangle,
+  FolderOpen,
+  Plus,
+  Send,
+  User,
+  MapPin,
+  Flame,
+  Check,
+  FileText,
+  LocateFixed,
+  Satellite,
+  Activity,
+  BrainCircuit,
+  ExternalLink,
+  Clock3,
+  Target,
+  CircleDot,
+} from 'lucide-react';
+
+import type {
+  InvestigationCase,
+  PriorityLevel,
+  ThermalEvent,
+} from '../../types';
+
+import { TypewriterHeading } from '../TypewriterHeading';
+
+// ============================================================
+// PROPS
+// ============================================================
+
+interface InvestigationPageProps {
+  cases: InvestigationCase[];
+  events: ThermalEvent[];
+  selectedCaseId: string | null;
+  onSelectCase: (caseId: string) => void;
+  onUpdateCaseStatus: (
+    caseId: string,
+    newStatus: InvestigationCase['status'],
+  ) => void;
+  onAddCaseNote: (caseId: string, noteText: string) => void;
+}
+
+// ============================================================
+// FLEXIBLE DATA TYPES
+// ============================================================
+
+type InvestigationNote = {
+  id?: string | number;
+  author?: string;
+  timestamp?: string;
+  text?: string;
+};
+
+type ExtendedInvestigationCase = InvestigationCase & {
+  notes?: unknown;
+};
+
+type ExtendedThermalEvent = ThermalEvent & {
+  probabilities?: unknown;
+  sourceProbabilities?: unknown;
+  evidence?: unknown;
+  evidenceList?: unknown;
+};
+
+/*
+ * A case as shown in the UI.
+ *
+ * origin 'docket' -> an existing case from the `cases` prop that is linked
+ *                    to a live event (status/notes handled by the parent)
+ * origin 'auto'   -> a case generated from the live ML output (status and
+ *                    notes are kept locally in this component)
+ */
+type DisplayCase = {
+  caseId: string;
+  eventId: string;
+  eventName: string;
+  priority: PriorityLevel;
+  score: number;
+  status: InvestigationCase['status'];
+  location: string;
+  notes: InvestigationNote[];
+  origin: 'docket' | 'auto';
+};
+
+// ============================================================
+// CONSTANTS
+// ============================================================
+
+// Max number of auto-generated cases shown from the live ML events.
+const MAX_AUTO_CASES = 12;
+
+// If nothing is CRITICAL/HIGH, still show the top N events by ML priority.
+const FALLBACK_CASES = 5;
+
+const SOURCE_LABELS = [
+  { key: 'Agriculture_Biomass', label: 'Agriculture / Biomass' },
+  { key: 'Forest_Natural', label: 'Forest / Natural' },
+  { key: 'Industrial', label: 'Industrial' },
+  { key: 'Waste_Other', label: 'Waste / Other' },
+] as const;
+
+// ============================================================
+// HELPERS
+// ============================================================
+
+function toArray<T>(value: unknown): T[] {
+  if (Array.isArray(value)) {
+    return value as T[];
+  }
+
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+
+    for (const key of ['events', 'cases', 'data', 'items', 'results']) {
+      if (Array.isArray(record[key])) {
+        return record[key] as T[];
+      }
+    }
+  }
+
+  return [];
+}
+
+function priorityClasses(priority: PriorityLevel) {
+  switch (priority) {
+    case 'CRITICAL':
+      return {
+        badge: 'bg-red-500/15 text-red-300 border-red-500/40',
+        text: 'text-red-300',
+        dot: 'bg-red-400',
+      };
+
+    case 'HIGH':
+      return {
+        badge: 'bg-orange-500/15 text-orange-300 border-orange-500/40',
+        text: 'text-orange-300',
+        dot: 'bg-orange-400',
+      };
+
+    case 'MEDIUM':
+      return {
+        badge: 'bg-amber-500/15 text-amber-300 border-amber-500/40',
+        text: 'text-amber-300',
+        dot: 'bg-amber-400',
+      };
+
+    case 'LOW':
+      return {
+        badge: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40',
+        text: 'text-emerald-300',
+        dot: 'bg-emerald-400',
+      };
+
+    default:
+      return {
+        badge: 'bg-slate-500/15 text-slate-300 border-slate-500/40',
+        text: 'text-slate-300',
+        dot: 'bg-slate-400',
+      };
+  }
+}
+
+function statusLabel(status: InvestigationCase['status'] | undefined) {
+  return String(status ?? 'UNKNOWN').replace(/_/g, ' ');
+}
+
+function formatNumber(value: unknown, digits = 2) {
+  const number = Number(value);
+
+  if (value === null || value === undefined || !Number.isFinite(number)) {
+    return '—';
+  }
+
+  return number.toFixed(digits);
+}
+
+function formatPercent(value: unknown) {
+  const number = Number(value);
+
+  if (!Number.isFinite(number)) {
+    return '0%';
+  }
+
+  const normalized = number > 1 ? number / 100 : number;
+
+  return `${Math.round(Math.max(0, Math.min(1, normalized)) * 100)}%`;
+}
+
+function formatDateTime(value?: string) {
+  if (!value) {
+    return 'Time unavailable';
+  }
+
+  const parsed = new Date(value);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+
+  return parsed.toLocaleString('en-IN', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+    timeZone: 'Asia/Kolkata',
+  });
+}
+
+function getSourceProbability(
+  probabilities: unknown,
+  source:
+    | 'Agriculture_Biomass'
+    | 'Forest_Natural'
+    | 'Industrial'
+    | 'Waste_Other',
+) {
+  if (!probabilities || typeof probabilities !== 'object') {
+    return 0;
+  }
+
+  const value = (probabilities as Record<string, unknown>)[source];
+  const number = Number(value);
+
+  if (!Number.isFinite(number)) {
+    return 0;
+  }
+
+  return number > 1
+    ? Math.max(0, Math.min(1, number / 100))
+    : Math.max(0, Math.min(1, number));
+}
+
+/*
+ * Events that need a human look: CRITICAL / HIGH ML priority,
+ * or the model flagged insufficient evidence.
+ */
+function isEscalated(event: ExtendedThermalEvent) {
+  return (
+    event.investigationPriority === 'CRITICAL' ||
+    event.investigationPriority === 'HIGH' ||
+    Boolean(event.insufficientEvidence)
+  );
+}
+
+function byPriorityScoreDesc(a: ThermalEvent, b: ThermalEvent) {
+  return (Number(b.priorityScore) || 0) - (Number(a.priorityScore) || 0);
+}
+
+// ============================================================
+// MAIN COMPONENT
+// ============================================================
+
+export const InvestigationPage: React.FC<InvestigationPageProps> = ({
+  cases,
+  events,
+  selectedCaseId,
+  onSelectCase,
+  onUpdateCaseStatus,
+  onAddCaseNote,
+}) => {
+  const [newNote, setNewNote] = useState('');
+  const [actionFeedback, setActionFeedback] = useState<string | null>(null);
+
+  // Local state for auto-generated cases
+  const [localSelectedId, setLocalSelectedId] = useState<string | null>(null);
+
+  const [localStatus, setLocalStatus] = useState<
+    Record<string, InvestigationCase['status']>
+  >({});
+
+  const [localNotes, setLocalNotes] = useState<
+    Record<string, InvestigationNote[]>
+  >({});
+
+  // ----------------------------------------------------------
+  // SAFE COLLECTIONS
+  // ----------------------------------------------------------
+
+  const safeCases = useMemo(() => toArray<InvestigationCase>(cases), [cases]);
+
+  const safeEvents = useMemo(() => toArray<ThermalEvent>(events), [events]);
+
+  const eventById = useMemo(() => {
+    const map = new Map<string, ExtendedThermalEvent>();
+
+    safeEvents.forEach((event) => {
+      if (event) {
+        map.set(String(event.id), event as ExtendedThermalEvent);
+      }
+    });
+
+    return map;
+  }, [safeEvents]);
+
+  // ----------------------------------------------------------
+  // CASES DRIVEN BY THE LIVE ML EVENTS
+  // ----------------------------------------------------------
+
+  const displayCases = useMemo<DisplayCase[]>(() => {
+    const result: DisplayCase[] = [];
+    const usedEventIds = new Set<string>();
+
+    // 1) Existing dockets, but only if their event is actually loaded.
+    //    Dockets pointing to events that do not exist are dropped, so no
+    //    stale/hardcoded case is shown with missing telemetry.
+    safeCases.forEach((currentCase) => {
+      const event = eventById.get(String(currentCase.eventId));
+
+      if (!event) {
+        return;
+      }
+
+      usedEventIds.add(String(event.id));
+
+      result.push({
+        caseId: String(currentCase.caseId),
+        eventId: String(currentCase.eventId),
+        eventName: event.name ?? currentCase.eventName,
+        priority:
+          event.investigationPriority ?? currentCase.priority ?? 'MEDIUM',
+        score:
+          Number(event.priorityScore ?? currentCase.score ?? 0) || 0,
+        status: currentCase.status,
+        location: currentCase.location,
+        notes: toArray<InvestigationNote>(
+          (currentCase as ExtendedInvestigationCase).notes,
+        ),
+        origin: 'docket',
+      });
+    });
+
+    // 2) Auto cases from ML output (highest priority score first)
+    const ranked = Array.from(eventById.values())
+      .filter((event) => !usedEventIds.has(String(event.id)))
+      .sort(byPriorityScoreDesc);
+
+    let candidates = ranked.filter(isEscalated);
+
+    if (result.length === 0 && candidates.length === 0) {
+      candidates = ranked.slice(0, FALLBACK_CASES);
+    }
+
+    candidates.slice(0, MAX_AUTO_CASES).forEach((event) => {
+      const eventId = String(event.id);
+      const caseId = `INV-${eventId.replace(/^EVT-/, '')}`;
+      const priority: PriorityLevel = event.investigationPriority ?? 'MEDIUM';
+      const source = event.likelySource ?? 'Uncertain';
+
+      const triageText =
+        `Auto-triage from VEYRONIX ML: predicted source ${source} ` +
+        `(${formatPercent(event.confidence)} confidence), ` +
+        `${priority} priority (score ${Math.round(
+          Number(event.priorityScore) || 0,
+        )}/100), peak FRP ${formatNumber(event.frpMw, 1)} MW.` +
+        (event.insufficientEvidence
+          ? ' Model evidence is insufficient; human verification required.'
+          : '');
+
+      const triageNote: InvestigationNote = {
+        id: `${caseId}-triage`,
+        author: 'VEYRONIX Auto-Triage',
+        timestamp: formatDateTime(event.detectionTimeUtc),
+        text: triageText,
+      };
+
+      result.push({
+        caseId,
+        eventId,
+        eventName: event.name,
+        priority,
+        score: Number(event.priorityScore) || 0,
+        status: (localStatus[caseId] ?? 'QUEUED') as InvestigationCase['status'],
+        location: `${formatNumber(event.lat, 4)}, ${formatNumber(
+          event.lng,
+          4,
+        )}${event.state ? `, ${event.state}` : ''}`,
+        notes: [triageNote, ...(localNotes[caseId] ?? [])],
+        origin: 'auto',
+      });
+    });
+
+    return result;
+  }, [safeCases, eventById, localStatus, localNotes]);
+
+  const openCaseCount = useMemo(
+    () =>
+      displayCases.filter(
+        (currentCase) => String(currentCase.status) !== 'RESOLVED',
+      ).length,
+    [displayCases],
+  );
+
+  // ----------------------------------------------------------
+  // SELECTION
+  // ----------------------------------------------------------
+
+  // Follow the parent's selection when it points to a case we show.
+  useEffect(() => {
+    if (
+      selectedCaseId &&
+      displayCases.some(
+        (currentCase) => currentCase.caseId === String(selectedCaseId),
+      )
+    ) {
+      setLocalSelectedId(String(selectedCaseId));
+    }
+  }, [selectedCaseId, displayCases]);
+
+  const handleSelectCase = (caseId: string) => {
+    setLocalSelectedId(caseId);
+    onSelectCase(caseId);
+  };
+
+  const activeCase = useMemo<DisplayCase | undefined>(
+    () =>
+      displayCases.find((c) => c.caseId === localSelectedId) ??
+      displayCases.find((c) => c.caseId === String(selectedCaseId)) ??
+      displayCases[0],
+    [displayCases, localSelectedId, selectedCaseId],
+  );
+
+  // ----------------------------------------------------------
+  // LINK CASE TO REAL THERMAL EVENT
+  // ----------------------------------------------------------
+
+  const activeEvent = useMemo<ExtendedThermalEvent | undefined>(() => {
+    if (!activeCase) {
+      return undefined;
+    }
+
+    return eventById.get(activeCase.eventId);
+  }, [eventById, activeCase]);
+
+  // ----------------------------------------------------------
+  // CASE NOTES
+  // ----------------------------------------------------------
+
+  const caseNotes = activeCase?.notes ?? [];
+
+  // ----------------------------------------------------------
+  // EVENT PROBABILITIES
+  // ----------------------------------------------------------
+
+  const probabilities = useMemo(() => {
+    if (!activeEvent) {
+      return {};
+    }
+
+    return activeEvent.probabilities ?? activeEvent.sourceProbabilities ?? {};
+  }, [activeEvent]);
+
+  // ----------------------------------------------------------
+  // EVENT EVIDENCE
+  // ----------------------------------------------------------
+
+  const evidenceList = useMemo<string[]>(() => {
+    if (!activeEvent) {
+      return [];
+    }
+
+    const rawEvidence = activeEvent.evidenceList ?? activeEvent.evidence;
+
+    if (Array.isArray(rawEvidence)) {
+      return rawEvidence.map((item) => String(item));
+    }
+
+    return [];
+  }, [activeEvent]);
+
+  // ----------------------------------------------------------
+  // LIVE VEYRONIX VALUES
+  // ----------------------------------------------------------
+
+  const liveSource = activeEvent?.likelySource ?? 'Uncertain';
+
+  const liveConfidence = activeEvent?.confidence ?? 0;
+
+  const livePriority: PriorityLevel =
+    activeEvent?.investigationPriority ?? activeCase?.priority ?? 'MEDIUM';
+
+  const livePriorityScore =
+    activeEvent?.priorityScore ?? activeCase?.score ?? 0;
+
+  const liveAbnormalityScore = activeEvent?.abnormalityScore ?? 0;
+
+  // ----------------------------------------------------------
+  // ACTION FEEDBACK
+  // ----------------------------------------------------------
+
+  useEffect(() => {
+    if (!actionFeedback) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setActionFeedback(null);
+    }, 3000);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [actionFeedback]);
+
+  // ----------------------------------------------------------
+  // UPDATE CASE STATUS
+  // ----------------------------------------------------------
+
+  const handleAction = (
+    status: InvestigationCase['status'],
+    label: string,
+  ) => {
+    if (!activeCase) {
+      return;
+    }
+
+    if (activeCase.origin === 'docket') {
+      onUpdateCaseStatus(activeCase.caseId, status);
+    } else {
+      setLocalStatus((previous) => ({
+        ...previous,
+        [activeCase.caseId]: status,
+      }));
+    }
+
+    setActionFeedback(label);
+  };
+
+  // ----------------------------------------------------------
+  // ADD NOTE
+  // ----------------------------------------------------------
+
+  const handleAddNoteSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    const trimmedNote = newNote.trim();
+
+    if (!trimmedNote || !activeCase) {
+      return;
+    }
+
+    if (activeCase.origin === 'docket') {
+      onAddCaseNote(activeCase.caseId, trimmedNote);
+    } else {
+      const note: InvestigationNote = {
+        id: `${activeCase.caseId}-note-${Date.now()}`,
+        author: 'Investigator',
+        timestamp: formatDateTime(new Date().toISOString()),
+        text: trimmedNote,
+      };
+
+      setLocalNotes((previous) => ({
+        ...previous,
+        [activeCase.caseId]: [...(previous[activeCase.caseId] ?? []), note],
+      }));
+    }
+
+    setNewNote('');
+
+    setActionFeedback('Investigator note added to the case record.');
+  };
+
+  // ----------------------------------------------------------
+  // OPEN COORDINATE
+  // ----------------------------------------------------------
+
+  const openMap = () => {
+    if (!activeEvent) {
+      return;
+    }
+
+    const lat = Number(activeEvent.lat);
+    const lng = Number(activeEvent.lng);
+
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      return;
+    }
+
+    const url = `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
+
+    window.open(url, '_blank', 'noopener,noreferrer');
+  };
+
+  // ==========================================================
+  // RENDER
+  // ==========================================================
+
+  return (
+    <div className="space-y-6 select-text">
+
+      {/* HEADER */}
+
+      <div className="bg-[#080d25]/95 border border-[#1e2a60] rounded-2xl p-4 sm:p-5 shadow-2xl">
+
+        <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4">
+
+          <div>
+
+            <div className="flex items-center gap-2.5">
+
+              <ShieldAlert className="w-6 h-6 text-cyan-400" />
+
+              <TypewriterHeading
+                as="h1"
+                text="THERMAL EVENT INVESTIGATION"
+                className="text-xl sm:text-2xl font-bold text-white"
+                glow={true}
+                glowColor="cyan"
+                speed={20}
+              />
+
+            </div>
+
+            <p className="text-xs sm:text-sm text-slate-400 mt-1 font-sans-clean">
+              Human verification workspace linked directly to VEYRONIX thermal-event telemetry and ML attribution. Cases are generated from live ML priority scores.
+            </p>
+
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+
+            <span className="px-3 py-1.5 rounded-xl bg-cyan-950/40 border border-cyan-500/40 text-cyan-300 text-xs font-heading font-bold">
+              {openCaseCount} OPEN CASE{openCaseCount === 1 ? '' : 'S'}
+            </span>
+
+            <span className="px-3 py-1.5 rounded-xl bg-emerald-950/30 border border-emerald-500/30 text-emerald-300 text-xs font-heading font-bold flex items-center gap-1.5">
+              <CircleDot className="w-3.5 h-3.5" />
+              LIVE EVENT LINK
+            </span>
+
+          </div>
+
+        </div>
+
+        {actionFeedback && (
+          <div className="mt-4 p-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-xs font-semibold text-emerald-300 flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4" />
+            {actionFeedback}
+          </div>
+        )}
+
+      </div>
+
+      {/* NO CASE */}
+
+      {!activeCase ? (
+
+        <div className="rounded-2xl border border-dashed border-[#26366e] bg-[#070b1e]/80 p-8 text-center">
+
+          <Satellite className="w-10 h-10 mx-auto text-cyan-400/70 mb-3" />
+
+          <h2 className="text-lg font-bold text-white font-heading">
+            NO INVESTIGATION CASES
+          </h2>
+
+          <p className="text-sm text-slate-400 max-w-xl mx-auto mt-2">
+            No thermal events are loaded yet. Cases appear here automatically for events the ML model scores as CRITICAL or HIGH priority, or flags for human verification.
+          </p>
+
+        </div>
+
+      ) : (
+
+        <div className="grid grid-cols-1 xl:grid-cols-12 gap-5">
+
+          {/* CASE LIST */}
+
+          <div className="xl:col-span-4 space-y-3">
+
+            <TypewriterHeading
+              as="h2"
+              text="INVESTIGATION DOCKET"
+              className="text-xs font-bold uppercase text-cyan-300 pb-2 border-b border-[#1b2554]"
+              glow={true}
+              glowColor="cyan"
+              speed={25}
+            />
+
+            <div className="space-y-3">
+
+              {displayCases.map((currentCase) => {
+
+                const isSelected = activeCase.caseId === currentCase.caseId;
+
+                const linkedEvent = eventById.get(currentCase.eventId);
+
+                const priority: PriorityLevel =
+                  linkedEvent?.investigationPriority ??
+                  currentCase.priority ??
+                  'MEDIUM';
+
+                const classes = priorityClasses(priority);
+
+                return (
+
+                  <button
+                    type="button"
+                    key={currentCase.caseId}
+                    onClick={() => handleSelectCase(currentCase.caseId)}
+                    className={`w-full text-left p-4 rounded-2xl border transition-all ${
+                      isSelected
+                        ? 'bg-[#0e163d] border-cyan-400 shadow-[0_0_20px_rgba(6,182,212,0.35)] ring-1 ring-cyan-400/40'
+                        : 'bg-[#070b1e] border-[#1b2554] hover:bg-[#0c1232] hover:border-cyan-500/40'
+                    }`}
+                  >
+
+                    <div className="flex items-center justify-between gap-2">
+
+                      <span className="text-xs font-bold font-mono text-cyan-300">
+                        {currentCase.caseId}
+                      </span>
+
+                      <span
+                        className={`px-2 py-0.5 rounded border text-[10px] font-bold ${classes.badge}`}
+                      >
+                        {priority}
+                      </span>
+
+                    </div>
+
+                    <h3 className="text-sm font-bold font-heading text-white mt-2 leading-snug">
+                      {linkedEvent?.name ?? currentCase.eventName}
+                    </h3>
+
+                    <div className="mt-1 text-[11px] text-slate-400 font-mono">
+                      Event:{' '}
+                      <span className="text-slate-200">
+                        {currentCase.eventId}
+                      </span>
+                    </div>
+
+                    {linkedEvent ? (
+
+                      <div className="mt-2 grid grid-cols-2 gap-2">
+
+                        <MiniMetric
+                          label="Source"
+                          value={linkedEvent.likelySource ?? 'Uncertain'}
+                        />
+
+                        <MiniMetric
+                          label="Confidence"
+                          value={formatPercent(linkedEvent.confidence)}
+                        />
+
+                      </div>
+
+                    ) : (
+
+                      <div className="mt-2 text-[10px] text-amber-300">
+                        Live telemetry not loaded
+                      </div>
+
+                    )}
+
+                    <div className="mt-3 pt-2 border-t border-[#1b2554] flex items-center justify-between">
+
+                      <span className="text-[11px] font-mono font-bold text-cyan-400">
+                        Priority{' '}
+                        {Math.round(
+                          Number(
+                            linkedEvent?.priorityScore ?? currentCase.score ?? 0,
+                          ) || 0,
+                        )}
+                        /100
+                      </span>
+
+                      <span className="px-2 py-0.5 rounded-full bg-[#0f1638] text-[10px] font-bold text-slate-300 uppercase">
+                        {statusLabel(currentCase.status)}
+                      </span>
+
+                    </div>
+
+                    <div className="mt-3 flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 text-xs font-heading font-bold">
+                      <FolderOpen className="w-3.5 h-3.5" />
+                      OPEN CASE
+                    </div>
+
+                  </button>
+                );
+              })}
+
+            </div>
+
+          </div>
+
+          {/* ACTIVE CASE */}
+
+          <div className="xl:col-span-8 bg-[#080d25]/95 border border-[#1e2a60] rounded-2xl p-4 sm:p-5 shadow-2xl space-y-5">
+
+            {/* CASE IDENTITY */}
+
+            <div className="pb-4 border-b border-[#1b2554]">
+
+              <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+
+                <div className="min-w-0">
+
+                  <div className="flex flex-wrap items-center gap-2 mb-2">
+
+                    <span className="text-sm font-bold font-mono text-cyan-400">
+                      {activeCase.caseId}
+                    </span>
+
+                    <span className="text-xs text-slate-500">•</span>
+
+                    <span className="text-xs text-slate-400 font-mono">
+                      Event {activeCase.eventId}
+                    </span>
+
+                  </div>
+
+                  <h2 className="text-xl sm:text-2xl font-bold font-heading text-white leading-tight">
+                    {activeEvent?.name ?? activeCase.eventName}
+                  </h2>
+
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2 text-xs text-slate-400">
+
+                    <span className="flex items-center gap-1.5">
+
+                      <MapPin className="w-3.5 h-3.5 text-cyan-400" />
+
+                      {activeEvent
+                        ? `${formatNumber(activeEvent.lat, 4)}, ${formatNumber(
+                            activeEvent.lng,
+                            4,
+                          )}`
+                        : activeCase.location}
+
+                    </span>
+
+                    {activeEvent?.state && <span>{activeEvent.state}</span>}
+
+                    {activeEvent?.region && <span>• {activeEvent.region}</span>}
+
+                  </div>
+
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
+
+                  <span
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold border ${
+                      priorityClasses(livePriority).badge
+                    }`}
+                  >
+                    {livePriority} PRIORITY
+                  </span>
+
+                  <span className="px-3 py-1.5 rounded-xl bg-[#0f1638] text-xs font-bold font-heading text-slate-200 border border-[#1e2a60]">
+                    {statusLabel(activeCase.status)}
+                  </span>
+
+                </div>
+
+              </div>
+
+            </div>
+
+            {/* LIVE EVENT TELEMETRY */}
+
+            {activeEvent ? (
+
+              <>
+
+                <section>
+
+                  <div className="flex items-center justify-between mb-2.5">
+
+                    <TypewriterHeading
+                      as="h3"
+                      text="LIVE EVENT TELEMETRY"
+                      className="text-xs font-bold uppercase text-cyan-300"
+                      glow={true}
+                      glowColor="cyan"
+                      speed={25}
+                    />
+
+                    <button
+                      type="button"
+                      onClick={openMap}
+                      className="px-2.5 py-1 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 text-[10px] font-bold flex items-center gap-1.5 hover:bg-cyan-500 hover:text-slate-950 transition-colors"
+                    >
+                      <ExternalLink className="w-3 h-3" />
+                      OPEN COORDINATE
+                    </button>
+
+                  </div>
+
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
+
+                    <MetricCard
+                      icon={<Flame className="w-4 h-4" />}
+                      label="Peak FRP"
+                      value={`${formatNumber(activeEvent.frpMw, 2)} MW`}
+                      tone="red"
+                    />
+
+                    <MetricCard
+                      icon={<Activity className="w-4 h-4" />}
+                      label="Abnormality"
+                      value={`${formatNumber(liveAbnormalityScore, 0)}/100`}
+                      tone="amber"
+                    />
+
+                    <MetricCard
+                      icon={<BrainCircuit className="w-4 h-4" />}
+                      label="ML confidence"
+                      value={formatPercent(liveConfidence)}
+                      tone="cyan"
+                    />
+
+                    <MetricCard
+                      icon={<Target className="w-4 h-4" />}
+                      label="Priority score"
+                      value={`${Math.round(Number(livePriorityScore) || 0)}/100`}
+                      tone="purple"
+                    />
+
+                  </div>
+
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5 mt-2.5">
+
+                    <InfoMetric
+                      label="Predicted source"
+                      value={String(liveSource)}
+                    />
+
+                    <InfoMetric
+                      label="Sensor"
+                      value={activeEvent.sensor || 'FIRMS'}
+                    />
+
+                    <InfoMetric
+                      label="Brightness"
+                      value={`${formatNumber(activeEvent.brightnessTempK, 1)} K`}
+                    />
+
+                    <InfoMetric
+                      label="Detected"
+                      value={formatDateTime(activeEvent.detectionTimeUtc)}
+                    />
+
+                  </div>
+
+                </section>
+
+                {/* SOURCE PROBABILITIES */}
+
+                <section>
+
+                  <div className="flex items-center gap-2 mb-2.5">
+
+                    <BrainCircuit className="w-4 h-4 text-purple-400" />
+
+                    <h3 className="text-xs font-bold uppercase text-purple-300 font-heading">
+                      ML SOURCE ATTRIBUTION
+                    </h3>
+
+                    <span className="text-[10px] text-slate-500 font-mono">
+                      LightGBM
+                    </span>
+
+                  </div>
+
+                  <div className="rounded-xl bg-[#070b1e] border border-[#1b2554] p-4 space-y-3">
+
+                    {SOURCE_LABELS.map((source) => {
+
+                      const probability = getSourceProbability(
+                        probabilities,
+                        source.key,
+                      );
+
+                      const width = probability * 100;
+
+                      const isPredicted = source.key === liveSource;
+
+                      return (
+
+                        <div key={source.key}>
+
+                          <div className="flex items-center justify-between text-[11px] mb-1">
+
+                            <span
+                              className={
+                                isPredicted
+                                  ? 'text-white font-bold'
+                                  : 'text-slate-400'
+                              }
+                            >
+                              {source.label}
+                            </span>
+
+                            <span className="font-mono text-slate-300">
+                              {Math.round(width)}%
+                            </span>
+
+                          </div>
+
+                          <div className="h-2 rounded-full bg-[#151d40] overflow-hidden">
+
+                            <div
+                              className={`h-full rounded-full transition-all ${
+                                isPredicted ? 'bg-cyan-400' : 'bg-slate-600'
+                              }`}
+                              style={{ width: `${width}%` }}
+                            />
+
+                          </div>
+
+                        </div>
+                      );
+                    })}
+
+                    <div className="pt-2 border-t border-[#1b2554] flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-slate-500">
+
+                      <span>
+                        Model output — not independent ground truth.
+                      </span>
+
+                      {activeEvent.insufficientEvidence && (
+                        <span className="text-amber-300 font-semibold">
+                          Review required
+                        </span>
+                      )}
+
+                    </div>
+
+                  </div>
+
+                </section>
+
+                {/* LOCATION / SPATIAL CONTEXT */}
+
+                <section>
+
+                  <div className="flex items-center gap-2 mb-2.5">
+
+                    <LocateFixed className="w-4 h-4 text-emerald-400" />
+
+                    <h3 className="text-xs font-bold uppercase text-emerald-300 font-heading">
+                      HOTSPOT LOCATION CONTEXT
+                    </h3>
+
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+
+                    <div className="rounded-xl bg-[#070b1e] border border-[#1b2554] p-4">
+
+                      <div className="text-[10px] uppercase text-slate-500 font-heading font-bold">
+                        FIRMS event coordinate
+                      </div>
+
+                      <div className="mt-2 text-lg font-mono font-bold text-white">
+
+                        {formatNumber(activeEvent.lat, 5)}
+
+                        <span className="text-slate-500 mx-1">,</span>
+
+                        {formatNumber(activeEvent.lng, 5)}
+
+                      </div>
+
+                      <p className="text-[10px] text-slate-500 mt-2">
+                        Satellite hotspot coordinate; not a building-level exact fire boundary.
+                      </p>
+
+                    </div>
+
+                    <div className="rounded-xl bg-[#070b1e] border border-[#1b2554] p-4">
+
+                      <div className="text-[10px] uppercase text-slate-500 font-heading font-bold">
+                        Spatial context
+                      </div>
+
+                      <div className="mt-2 text-sm font-bold text-white">
+                        {activeEvent.spatialContext?.landUseClassification ??
+                          'Context unavailable'}
+                      </div>
+
+                      <div className="mt-2 grid grid-cols-2 gap-2 text-[10px] text-slate-400">
+
+                        <span>
+                          Buffer:{' '}
+                          <strong className="text-slate-200">
+                            {formatNumber(
+                              activeEvent.spatialContext?.bufferRadiusKm,
+                              1,
+                            )}{' '}
+                            km
+                          </strong>
+                        </span>
+
+                        <span>
+                          Nearby facilities:{' '}
+                          <strong className="text-slate-200">
+                            {activeEvent.spatialContext?.nearbyFacilitiesCount !==
+                              undefined &&
+                            activeEvent.spatialContext?.nearbyFacilitiesCount !==
+                              null &&
+                            Number.isFinite(
+                              Number(
+                                activeEvent.spatialContext.nearbyFacilitiesCount,
+                              ),
+                            )
+                              ? activeEvent.spatialContext.nearbyFacilitiesCount
+                              : '—'}
+                          </strong>
+                        </span>
+
+                      </div>
+
+                      {activeEvent.spatialContext?.facilityName && (
+
+                        <div className="mt-2 text-[10px] text-cyan-300">
+                          Nearby context:{' '}
+                          {activeEvent.spatialContext.facilityName}
+                        </div>
+
+                      )}
+
+                    </div>
+
+                  </div>
+
+                </section>
+
+                {/* EVIDENCE */}
+
+                <section>
+
+                  <div className="flex items-center justify-between mb-2.5">
+
+                    <TypewriterHeading
+                      as="h3"
+                      text="AVAILABLE EVIDENCE"
+                      className="text-xs font-bold uppercase text-cyan-300"
+                      glow={true}
+                      glowColor="cyan"
+                      speed={25}
+                    />
+
+                    <span className="text-[10px] text-slate-500">
+                      {evidenceList.length} recorded items
+                    </span>
+
+                  </div>
+
+                  <div className="rounded-xl bg-[#070b1e] border border-[#1b2554] p-4 space-y-2">
+
+                    {evidenceList.length ? (
+
+                      evidenceList.map((evidence, index) => (
+
+                        <div
+                          key={`${activeEvent.id}-evidence-${index}`}
+                          className="flex items-start gap-2 text-xs text-slate-200"
+                        >
+
+                          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+
+                          <span>{String(evidence)}</span>
+
+                        </div>
+
+                      ))
+
+                    ) : (
+
+                      <div className="text-xs text-slate-500">
+                        No additional evidence record is attached to this event.
+                      </div>
+
+                    )}
+
+                    {activeEvent.insufficientEvidence && (
+
+                      <div className="pt-2 mt-2 border-t border-[#1b2554] flex items-start gap-2 text-xs text-amber-300">
+
+                        <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+
+                        <span>
+                          Model evidence is insufficient for a confident attribution. Human verification is required.
+                        </span>
+
+                      </div>
+
+                    )}
+
+                  </div>
+
+                </section>
+
+                {/* ACTIONS */}
+
+                <section>
+
+                  <h3 className="text-xs font-bold uppercase text-white font-heading mb-2.5">
+                    INVESTIGATOR ACTIONS
+                  </h3>
+
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
+
+                    <ActionButton
+                      icon={<FileText className="w-3.5 h-3.5" />}
+                      label="Investigating"
+                      onClick={() =>
+                        handleAction(
+                          'INVESTIGATING',
+                          'Case marked as under investigation.',
+                        )
+                      }
+                    />
+
+                    <ActionButton
+                      icon={<MapPin className="w-3.5 h-3.5" />}
+                      label="Field request"
+                      onClick={() =>
+                        handleAction(
+                          'FIELD_REQUESTED',
+                          'Field verification requested.',
+                        )
+                      }
+                    />
+
+                    <ActionButton
+                      icon={<Plus className="w-3.5 h-3.5" />}
+                      label="Add note"
+                      onClick={() =>
+                        document.getElementById('case-note-input')?.focus()
+                      }
+                    />
+
+                    <ActionButton
+                      icon={<Check className="w-3.5 h-3.5" />}
+                      label="Resolve"
+                      tone="green"
+                      onClick={() =>
+                        handleAction('RESOLVED', 'Case marked resolved.')
+                      }
+                    />
+
+                  </div>
+
+                </section>
+
+              </>
+
+            ) : (
+
+              /* NO LIVE EVENT LINK */
+
+              <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-5">
+
+                <div className="flex items-start gap-3">
+
+                  <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0" />
+
+                  <div>
+
+                    <h3 className="text-sm font-bold text-amber-300 font-heading">
+                      LIVE EVENT TELEMETRY NOT LOADED
+                    </h3>
+
+                    <p className="text-xs text-slate-400 mt-1">
+                      This docket exists, but the corresponding ThermalEvent is not currently available in the frontend event set. No location, ML attribution, FRP or facility facts are being invented here.
+                    </p>
+
+                  </div>
+
+                </div>
+
+              </div>
+
+            )}
+
+            {/* CASE LOG */}
+
+            <section className="pt-1">
+
+              <TypewriterHeading
+                as="h3"
+                text="INVESTIGATION LOG"
+                className="text-xs font-bold uppercase text-cyan-300 mb-2.5"
+                glow={true}
+                glowColor="cyan"
+                speed={25}
+              />
+
+              <div className="space-y-2 mb-3">
+
+                {caseNotes.length ? (
+
+                  caseNotes.map((note, index) => (
+
+                    <div
+                      key={note.id ?? `note-${index}`}
+                      className="p-3 rounded-xl bg-[#070b1e] border border-[#1b2554]"
+                    >
+
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+
+                        <span className="font-bold font-heading text-white text-xs flex items-center gap-1.5">
+
+                          <User className="w-3.5 h-3.5 text-cyan-400" />
+
+                          {note.author ?? 'Investigator'}
+
+                        </span>
+
+                        <span className="text-[10px] text-slate-500 font-mono flex items-center gap-1">
+
+                          <Clock3 className="w-3 h-3" />
+
+                          {note.timestamp ?? 'Time unavailable'}
+
+                        </span>
+
+                      </div>
+
+                      <p className="text-xs text-slate-300 leading-relaxed mt-1.5">
+                        {note.text ?? ''}
+                      </p>
+
+                    </div>
+
+                  ))
+
+                ) : (
+
+                  <div className="text-xs text-slate-500">
+                    No investigator notes yet.
+                  </div>
+
+                )}
+
+              </div>
+
+              <form
+                onSubmit={handleAddNoteSubmit}
+                className="flex flex-col sm:flex-row gap-2"
+              >
+
+                <input
+                  id="case-note-input"
+                  type="text"
+                  value={newNote}
+                  onChange={(event) => setNewNote(event.target.value)}
+                  placeholder="Add an observation or field-verification note..."
+                  className="flex-1 min-w-0 px-3.5 py-2.5 rounded-xl bg-[#070b1e] border border-[#1e2c69] text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/30"
+                />
+
+                <button
+                  type="submit"
+                  disabled={!newNote.trim()}
+                  className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 disabled:opacity-40 disabled:cursor-not-allowed text-slate-950 text-xs font-bold font-heading uppercase flex items-center justify-center gap-1.5"
+                >
+
+                  <Send className="w-3.5 h-3.5" />
+
+                  POST NOTE
+
+                </button>
+
+              </form>
+
+            </section>
+
+          </div>
+
+        </div>
+
+      )}
+
+    </div>
+  );
+};
+
+// ============================================================
+// SMALL UI COMPONENTS
+// ============================================================
+
+function MiniMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg bg-[#0a1030] border border-[#1b2554] px-2.5 py-2">
+
+      <div className="text-[9px] uppercase text-slate-500 font-heading font-bold">
+        {label}
+      </div>
+
+      <div className="text-[10px] text-slate-200 font-mono font-semibold mt-0.5 truncate">
+        {value}
+      </div>
+
+    </div>
+  );
+}
+
+// ============================================================
+
+function MetricCard({
+  icon,
+  label,
+  value,
+  tone,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+  tone: 'red' | 'amber' | 'cyan' | 'purple';
+}) {
+  const toneClasses = {
+    red: 'text-red-300',
+    amber: 'text-amber-300',
+    cyan: 'text-cyan-300',
+    purple: 'text-purple-300',
+  };
+
+  return (
+    <div className="rounded-xl bg-[#070b1e] border border-[#1b2554] p-3">
+
+      <div
+        className={`flex items-center gap-1.5 text-[10px] uppercase font-heading font-bold ${toneClasses[tone]}`}
+      >
+        {icon}
+        {label}
+      </div>
+
+      <div className="text-base sm:text-lg font-bold font-mono text-white mt-1.5">
+        {value}
+      </div>
+
+    </div>
+  );
+}
+
+// ============================================================
+
+function InfoMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl bg-[#070b1e] border border-[#1b2554] px-3 py-2.5">
+
+      <div className="text-[9px] uppercase text-slate-500 font-heading font-bold">
+        {label}
+      </div>
+
+      <div className="text-[11px] text-slate-200 font-mono font-semibold mt-1 truncate">
+        {value}
+      </div>
+
+    </div>
+  );
+}
+
+// ============================================================
+
+function ActionButton({
+  icon,
+  label,
+  onClick,
+  tone = 'default',
+}: {
+  icon: React.ReactNode;
+  label: string;
+  onClick: () => void;
+  tone?: 'default' | 'green';
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`p-2.5 rounded-xl border text-xs font-bold font-heading transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+        tone === 'green'
+          ? 'bg-emerald-500/10 hover:bg-emerald-500/80 border-emerald-500/40 text-emerald-300 hover:text-slate-950'
+          : 'bg-[#070b1e] hover:bg-[#0e163d] border-[#1e2c69] text-slate-200 hover:border-cyan-400/50'
+      }`}
+    >
+      {icon}
+      <span>{label}</span>
+    </button>
+  );
+}
