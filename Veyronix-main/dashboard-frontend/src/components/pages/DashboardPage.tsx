@@ -89,7 +89,7 @@ export const DashboardPage: React.FC<
   const timelineSteps = [
     {
       time: '08:00 IST',
-      label: 'MODIS Aqua pass over UP',
+      label: 'MODIS Aqua',
       detail:
         'Singrauli & Sonbhadra basin thermal anomaly logged',
     },
