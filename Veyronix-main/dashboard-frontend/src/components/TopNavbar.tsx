@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import {
   Search,
   Bell,
@@ -6,8 +6,6 @@ import {
   ChevronDown,
   X,
   Menu,
-  Sun,
-  Moon,
 } from 'lucide-react';
 import { AppPage } from '../types';
 
@@ -34,42 +32,6 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
 }) => {
   const [showNotifications, setShowNotifications] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
-
-  // ============================================================
-  // THEME STATE
-  // ============================================================
-
-  const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
-    if (typeof window === 'undefined') return true;
-
-    const savedTheme = localStorage.getItem('veyronix-theme');
-
-    if (savedTheme === 'light') {
-      return false;
-    }
-
-    return true;
-  });
-
-  // ============================================================
-  // APPLY THEME
-  // ============================================================
-
-  useEffect(() => {
-    const root = document.documentElement;
-
-    if (isDarkMode) {
-      root.classList.add('dark');
-      root.classList.remove('light');
-
-      localStorage.setItem('veyronix-theme', 'dark');
-    } else {
-      root.classList.add('light');
-      root.classList.remove('dark');
-
-      localStorage.setItem('veyronix-theme', 'light');
-    }
-  }, [isDarkMode]);
 
   // ============================================================
   // NOTIFICATIONS
@@ -99,17 +61,9 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
     },
   ];
 
-  // ============================================================
-  // THEME TOGGLE
-  // ============================================================
-
-  const toggleTheme = () => {
-    setIsDarkMode((previous) => !previous);
-  };
-
   return (
     <header
-      className={`
+      className="
         h-16
         w-full
         flex
@@ -125,16 +79,12 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
         sm:px-4
         md:px-6
         border-b
+        border-[#17224d]
+        bg-[#070b20]/95
         backdrop-blur-md
         transition-all
         duration-300
-
-        ${
-          isDarkMode
-            ? 'bg-[#070b20]/95 border-[#17224d]'
-            : 'bg-white/95 border-slate-200'
-        }
-      `}
+      "
     >
       {/* ====================================================== */}
       {/* LEFT: MOBILE MENU + BREADCRUMBS */}
@@ -145,20 +95,17 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
 
         <button
           onClick={onToggleMobileSidebar}
-          className={`
+          className="
             md:hidden
             shrink-0
             rounded-xl
             p-2
             cursor-pointer
             transition-all
-
-            ${
-              isDarkMode
-                ? 'text-slate-300 hover:text-white hover:bg-[#0e163d]'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-            }
-          `}
+            text-slate-300
+            hover:text-white
+            hover:bg-[#0e163d]
+          "
           aria-label="Open navigation menu"
         >
           <Menu className="w-5 h-5" />
@@ -168,7 +115,7 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
 
         <div className="flex min-w-0 items-center gap-2 text-xs font-semibold">
           <span
-            className={`
+            className="
               max-w-[110px]
               truncate
               font-heading
@@ -176,39 +123,26 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
               text-sm
               capitalize
               transition-colors
-
-              ${
-                isDarkMode
-                  ? 'text-white neon-glow-cyan'
-                  : 'text-slate-900'
-              }
-            `}
+              text-white
+              neon-glow-cyan
+            "
           >
             {currentPage.replace('-', ' ')}
           </span>
 
-          <span
-            className={
-              isDarkMode ? 'text-slate-600' : 'text-slate-300'
-            }
-          >
+          <span className="text-slate-600">
             /
           </span>
 
           <span
-            className={`
+            className="
               hidden
               text-[11px]
               font-heading
               tracking-widest
               sm:inline
-
-              ${
-                isDarkMode
-                  ? 'text-cyan-400/80'
-                  : 'text-cyan-600'
-              }
-            `}
+              text-cyan-400/80
+            "
           >
             SATELLITE COMMAND
           </span>
@@ -222,7 +156,7 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
       <div className="hidden min-w-0 flex-1 sm:block sm:max-w-[250px] md:max-w-md lg:max-w-lg">
         <div className="relative">
           <Search
-            className={`
+            className="
               absolute
               left-3
               top-1/2
@@ -230,13 +164,8 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
               w-4
               h-4
               pointer-events-none
-
-              ${
-                isDarkMode
-                  ? 'text-slate-400'
-                  : 'text-slate-500'
-              }
-            `}
+              text-slate-400
+            "
           />
 
           <input
@@ -244,38 +173,24 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
             placeholder="Search thermal anomalies, NASA FIRMS IDs..."
-            className={`
+            className="
               w-full
               pl-9
               pr-9
               py-1.5
               rounded-xl
               border
+              border-[#1e2b66]
+              bg-[#0a0f2e]
+              text-white
+              placeholder-slate-500
               text-xs
               focus:outline-none
               focus:ring-1
+              focus:border-cyan-400/70
+              focus:ring-cyan-400/40
               transition-all
-
-              ${
-                isDarkMode
-                  ? `
-                    bg-[#0a0f2e]
-                    border-[#1e2b66]
-                    text-white
-                    placeholder-slate-500
-                    focus:border-cyan-400/70
-                    focus:ring-cyan-400/40
-                  `
-                  : `
-                    bg-slate-50
-                    border-slate-300
-                    text-slate-900
-                    placeholder-slate-400
-                    focus:border-cyan-500
-                    focus:ring-cyan-400/30
-                  `
-              }
-            `}
+            "
           />
 
           {/* Clear Search */}
@@ -283,19 +198,15 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
           {searchQuery && (
             <button
               onClick={() => onSearchChange('')}
-              className={`
+              className="
                 absolute
                 right-2.5
                 top-1/2
                 -translate-y-1/2
+                text-slate-400
+                hover:text-white
                 transition-colors
-
-                ${
-                  isDarkMode
-                    ? 'text-slate-400 hover:text-white'
-                    : 'text-slate-400 hover:text-slate-700'
-                }
-              `}
+              "
               aria-label="Clear search"
             >
               <X className="w-3.5 h-3.5" />
@@ -309,12 +220,13 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
       {/* ====================================================== */}
 
       <div className="ml-auto flex shrink-0 items-center gap-1.5 sm:gap-2.5">
+
         {/* ================================================== */}
         {/* SATELLITE ONLINE */}
         {/* ================================================== */}
 
         <div
-          className={`
+          className="
             flex
             shrink-0
             items-center
@@ -325,6 +237,10 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
             py-1.5
             rounded-full
             border
+            border-cyan-500/30
+            bg-[#0a0f2e]
+            text-cyan-300
+            shadow-[0_0_12px_rgba(6,182,212,0.2)]
             text-[9px]
             sm:text-[10px]
             lg:text-[11px]
@@ -332,22 +248,7 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
             font-semibold
             transition-all
             duration-300
-
-            ${
-              isDarkMode
-                ? `
-                  bg-[#0a0f2e]
-                  border-cyan-500/30
-                  text-cyan-300
-                  shadow-[0_0_12px_rgba(6,182,212,0.2)]
-                `
-                : `
-                  bg-cyan-50
-                  border-cyan-300
-                  text-cyan-700
-                `
-            }
-          `}
+          "
         >
           <span
             className="
@@ -366,71 +267,6 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
         </div>
 
         {/* ================================================== */}
-        {/* LIGHT / DARK MODE */}
-        {/* ================================================== */}
-
-        <button
-          onClick={toggleTheme}
-          type="button"
-          aria-label={
-            isDarkMode
-              ? 'Switch to light mode'
-              : 'Switch to dark mode'
-          }
-          title={
-            isDarkMode
-              ? 'Switch to light mode'
-              : 'Switch to dark mode'
-          }
-          className={`
-            flex
-            h-9
-            w-9
-            sm:h-10
-            sm:w-10
-            shrink-0
-            items-center
-            justify-center
-            rounded-xl
-            border
-            transition-all
-            duration-300
-            cursor-pointer
-
-            ${
-              isDarkMode
-                ? `
-                  bg-[#0a0f2e]
-                  border-[#1e2b66]
-                  text-cyan-300
-                  hover:border-cyan-400/60
-                  hover:bg-cyan-500/10
-                  hover:text-cyan-200
-                `
-                : `
-                  bg-amber-50
-                  border-amber-300
-                  text-amber-600
-                  hover:bg-amber-100
-                  hover:border-amber-400
-                `
-            }
-          `}
-        >
-          {isDarkMode ? (
-            <Sun
-              className="w-4 h-4 sm:w-[18px] sm:h-[18px]"
-              strokeWidth={2}
-            />
-          ) : (
-            <Moon
-              className="w-4 h-4 sm:w-[18px] sm:h-[18px]"
-              strokeWidth={2}
-            />
-          )}
-        </button>
-
-        {/* ================================================== */}
         {/* NOTIFICATIONS */}
         {/* ================================================== */}
 
@@ -439,32 +275,19 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
             onClick={() =>
               setShowNotifications(!showNotifications)
             }
-            className={`
+            className="
               relative
               p-2
               rounded-xl
               border
+              border-[#1e2b66]
+              bg-[#0a0f2e]
+              text-slate-300
+              hover:text-white
+              hover:border-cyan-500/50
               transition-all
               cursor-pointer
-
-              ${
-                isDarkMode
-                  ? `
-                    bg-[#0a0f2e]
-                    border-[#1e2b66]
-                    text-slate-300
-                    hover:text-white
-                    hover:border-cyan-500/50
-                  `
-                  : `
-                    bg-white
-                    border-slate-300
-                    text-slate-600
-                    hover:text-slate-900
-                    hover:border-cyan-400
-                  `
-              }
-            `}
+            "
             title="Recent Alerts"
             aria-label="Recent Alerts"
           >
@@ -522,7 +345,17 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
               {/* Header */}
 
               <div className="flex items-center justify-between pb-2 border-b border-[#1b2554]">
-                <span className="font-heading font-bold text-white uppercase tracking-wider text-[11px] neon-glow-cyan">
+                <span
+                  className="
+                    font-heading
+                    font-bold
+                    text-white
+                    uppercase
+                    tracking-wider
+                    text-[11px]
+                    neon-glow-cyan
+                  "
+                >
                   System Alerts
                 </span>
 
@@ -601,7 +434,7 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
         <div className="relative">
           <button
             onClick={() => setShowUserMenu(!showUserMenu)}
-            className={`
+            className="
               flex
               items-center
               gap-1.5
@@ -613,32 +446,20 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
               py-1.5
               rounded-xl
               border
+              border-[#1e2b66]
+              bg-[#0a0f2e]
+              text-white
               text-xs
               font-semibold
               cursor-pointer
               transition-all
-
-              ${
-                isDarkMode
-                  ? `
-                    bg-[#0a0f2e]
-                    border-[#1e2b66]
-                    text-white
-                    hover:border-cyan-500/50
-                  `
-                  : `
-                    bg-white
-                    border-slate-300
-                    text-slate-800
-                    hover:border-cyan-400
-                  `
-              }
-            `}
+              hover:border-cyan-500/50
+            "
           >
             {/* User Icon */}
 
             <div
-              className={`
+              className="
                 w-6
                 h-6
                 shrink-0
@@ -649,13 +470,10 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
                 justify-center
                 font-bold
                 text-xs
-
-                ${
-                  isDarkMode
-                    ? 'bg-cyan-500/20 border-cyan-400/50 text-cyan-300'
-                    : 'bg-cyan-50 border-cyan-300 text-cyan-600'
-                }
-              `}
+                bg-cyan-500/20
+                border-cyan-400/50
+                text-cyan-300
+              "
             >
               <User className="w-3.5 h-3.5" />
             </div>
@@ -664,34 +482,18 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
 
             <div className="text-left hidden sm:block">
               <div
-                className={`
+                className="
                   text-[11px]
                   font-bold
                   font-heading
-
-                  ${
-                    isDarkMode
-                      ? 'text-white'
-                      : 'text-slate-800'
-                  }
-                `}
+                  text-white
+                "
               >
                 Zonal Officer
               </div>
             </div>
 
-            <ChevronDown
-              className={`
-                w-3.5
-                h-3.5
-
-                ${
-                  isDarkMode
-                    ? 'text-slate-400'
-                    : 'text-slate-500'
-                }
-              `}
-            />
+            <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
           </button>
 
           {/* ================================================= */}
