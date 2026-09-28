@@ -1,54 +1,184 @@
 @import "tailwindcss";
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400;1,500&family=Inter:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
 
+
+/* =========================================================
+   VEYRONIX GLOBAL THEME SYSTEM
+   ========================================================= */
+
 @layer base {
+
   :root {
     --color-bg-base: #060814;
     --color-card-base: #0c112d;
     --color-card-border: #1e2a60;
+
+    --page-bg: #060814;
+    --page-text: #e2e8f0;
+    --card-bg: rgba(12, 17, 45, 0.75);
+    --card-border: rgba(35, 50, 115, 0.6);
   }
+
+
+  /* =======================================================
+     DARK MODE — ORIGINAL VEYRONIX THEME
+     ======================================================= */
+
+  html.dark {
+    background-color: #060814;
+    color: #e2e8f0;
+  }
+
 
   body {
-    font-family: 'Inter', 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    color: #e2e8f0;
-    background-color: #060814;
+
+    font-family:
+      'Inter',
+      'Plus Jakarta Sans',
+      system-ui,
+      -apple-system,
+      BlinkMacSystemFont,
+      'Segoe UI',
+      sans-serif;
+
+    color: var(--page-text);
+
+    background-color: var(--page-bg);
+
     background-image:
-      radial-gradient(ellipse at 50% 0%, rgba(56, 189, 248, 0.09) 0%, transparent 60%),
-      radial-gradient(ellipse at 80% 30%, rgba(14, 165, 233, 0.05) 0%, transparent 50%),
-      radial-gradient(ellipse at 20% 70%, rgba(59, 130, 246, 0.04) 0%, transparent 50%);
+      radial-gradient(
+        ellipse at 50% 0%,
+        rgba(56, 189, 248, 0.09) 0%,
+        transparent 60%
+      ),
+      radial-gradient(
+        ellipse at 80% 30%,
+        rgba(14, 165, 233, 0.05) 0%,
+        transparent 50%
+      ),
+      radial-gradient(
+        ellipse at 20% 70%,
+        rgba(59, 130, 246, 0.04) 0%,
+        transparent 50%
+      );
+
     background-attachment: fixed;
+
+    transition:
+      background-color 0.25s ease,
+      color 0.25s ease;
   }
 
-  /* Typography crafted in the style of Philipp Nurullin & Konstantin Bulenkov (JetBrains Mono) */
-  code, pre, .font-mono, .font-jetbrains {
-    font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
-    font-feature-settings: "calt" 1, "liga" 1, "zero" 1;
+
+  html.dark body {
+    background-color: #060814;
+    color: #e2e8f0;
   }
 
-  h1, h2, h3, h4, h5, h6, .font-heading {
-    font-family: 'JetBrains Mono', 'Inter', monospace;
+
+  html.dark #root {
+    background-color: transparent;
+    color: #e2e8f0;
+    min-height: 100vh;
+  }
+
+
+  /* =======================================================
+     TYPOGRAPHY
+     ======================================================= */
+
+  code,
+  pre,
+  .font-mono,
+  .font-jetbrains {
+
+    font-family:
+      'JetBrains Mono',
+      ui-monospace,
+      SFMono-Regular,
+      Menlo,
+      Monaco,
+      Consolas,
+      monospace !important;
+
+    font-feature-settings:
+      "calt" 1,
+      "liga" 1,
+      "zero" 1;
+  }
+
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6,
+  .font-heading {
+
+    font-family:
+      'JetBrains Mono',
+      'Inter',
+      monospace;
+
     letter-spacing: -0.02em;
-    font-feature-settings: "calt" 1, "liga" 1;
+
+    font-feature-settings:
+      "calt" 1,
+      "liga" 1;
   }
 }
+
+
+/* =========================================================
+   FONT UTILITIES
+   ========================================================= */
 
 .font-jetbrains {
-  font-family: 'JetBrains Mono', ui-monospace, monospace !important;
-  font-feature-settings: "calt" 1, "liga" 1, "zero" 1;
+
+  font-family:
+    'JetBrains Mono',
+    ui-monospace,
+    monospace !important;
+
+  font-feature-settings:
+    "calt" 1,
+    "liga" 1,
+    "zero" 1;
 }
+
 
 .font-heading {
-  font-family: 'JetBrains Mono', 'Inter', monospace !important;
+
+  font-family:
+    'JetBrains Mono',
+    'Inter',
+    monospace !important;
+
   letter-spacing: -0.02em;
-  font-feature-settings: "calt" 1, "liga" 1;
+
+  font-feature-settings:
+    "calt" 1,
+    "liga" 1;
 }
+
 
 .font-sans-clean {
-  font-family: 'Inter', 'Plus Jakarta Sans', system-ui, sans-serif;
+
+  font-family:
+    'Inter',
+    'Plus Jakarta Sans',
+    system-ui,
+    sans-serif;
 }
 
-/* 4-Directional Neon Lighting on Headings (matching user screenshot) */
+
+/* =========================================================
+   NEON HEADINGS
+   ========================================================= */
+
 .neon-glow-heading {
+
   text-shadow:
     0 0 10px rgba(56, 189, 248, 0.9),
     0 0 20px rgba(56, 189, 248, 0.65),
@@ -57,110 +187,786 @@
     0 0 90px rgba(168, 85, 247, 0.25);
 }
 
+
 .neon-glow-cyan {
+
   text-shadow:
     0 0 8px rgba(34, 211, 238, 0.85),
     0 0 18px rgba(34, 211, 238, 0.5),
     0 0 30px rgba(6, 182, 212, 0.35);
 }
 
+
 .neon-glow-purple {
+
   text-shadow:
     0 0 8px rgba(192, 132, 252, 0.85),
     0 0 18px rgba(168, 85, 247, 0.5),
     0 0 30px rgba(147, 51, 234, 0.35);
 }
 
-/* Cyber Glass Card Styles */
+
+/* =========================================================
+   CYBER CARDS — DARK
+   ========================================================= */
+
 .cyber-card {
+
   background: rgba(12, 17, 45, 0.75);
+
   backdrop-filter: blur(12px);
+
   border: 1px solid rgba(35, 50, 115, 0.6);
-  box-shadow: 0 4px 20px -2px rgba(2, 6, 23, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+
+  box-shadow:
+    0 4px 20px -2px rgba(2, 6, 23, 0.6),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
+
 .cyber-card-glow {
+
   background: rgba(13, 19, 50, 0.85);
+
   backdrop-filter: blur(14px);
+
   border: 1px solid rgba(56, 189, 248, 0.35);
+
   box-shadow:
     0 0 20px rgba(56, 189, 248, 0.15),
     0 8px 32px rgba(2, 6, 23, 0.7),
     inset 0 0 15px rgba(56, 189, 248, 0.05);
 }
 
+
+/* =========================================================
+   CYBER BADGES
+   ========================================================= */
+
 .cyber-badge-cyan {
+
   border: 1px solid rgba(56, 189, 248, 0.5);
+
   background: rgba(14, 165, 233, 0.12);
+
   color: #7dd3fc;
-  box-shadow: 0 0 12px rgba(56, 189, 248, 0.25);
+
+  box-shadow:
+    0 0 12px rgba(56, 189, 248, 0.25);
 }
+
 
 .cyber-badge-purple {
+
   border: 1px solid rgba(168, 85, 247, 0.5);
+
   background: rgba(147, 51, 234, 0.12);
+
   color: #d8b4fe;
-  box-shadow: 0 0 12px rgba(168, 85, 247, 0.25);
+
+  box-shadow:
+    0 0 12px rgba(168, 85, 247, 0.25);
 }
 
-/* Cybernetic subtle grid pattern */
+
+/* =========================================================
+   CYBER GRID
+   ========================================================= */
+
 .bg-cyber-grid {
+
   background-image:
-    linear-gradient(to right, rgba(56, 189, 248, 0.04) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(56, 189, 248, 0.04) 1px, transparent 1px);
+    linear-gradient(
+      to right,
+      rgba(56, 189, 248, 0.04) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      to bottom,
+      rgba(56, 189, 248, 0.04) 1px,
+      transparent 1px
+    );
+
   background-size: 36px 36px;
 }
 
-/* Typewriter blinking cursor */
+
+/* =========================================================
+   TYPEWRITER
+   ========================================================= */
+
 @keyframes typewriterBlink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0; }
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0;
+  }
 }
+
 
 .animate-typewriter-cursor {
-  animation: typewriterBlink 0.85s infinite;
+
+  animation:
+    typewriterBlink 0.85s infinite;
 }
 
-/* Hover Card Glowing Lighting & Smooth Scale Effect */
+
+/* =========================================================
+   HOVER CARD GLOW
+   ========================================================= */
+
 .card-hover-glow {
-  transition: all 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+
+  transition:
+    all 0.28s cubic-bezier(0.16, 1, 0.3, 1);
 }
+
 
 .card-hover-glow:hover {
-  transform: translateY(-2px) scale(1.018);
-  border-color: rgba(56, 189, 248, 0.7) !important;
+
+  transform:
+    translateY(-2px)
+    scale(1.018);
+
+  border-color:
+    rgba(56, 189, 248, 0.7) !important;
+
   box-shadow:
     0 0 25px rgba(56, 189, 248, 0.35),
     0 0 50px rgba(14, 165, 233, 0.2),
     0 12px 35px rgba(2, 6, 23, 0.8),
     inset 0 0 15px rgba(56, 189, 248, 0.12) !important;
+
   z-index: 5;
 }
 
+
+/* =========================================================
+   INTERACTIVE BOX
+   ========================================================= */
+
 .box-interactive-glow {
-  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+
+  transition:
+    all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
+
 .box-interactive-glow:hover {
-  transform: scale(1.02);
-  border-color: rgba(34, 211, 238, 0.8) !important;
+
+  transform:
+    scale(1.02);
+
+  border-color:
+    rgba(34, 211, 238, 0.8) !important;
+
   box-shadow:
     0 0 20px rgba(34, 211, 238, 0.4),
     0 0 40px rgba(6, 182, 212, 0.2) !important;
 }
 
-/* Custom Scrollbar for Sci-Fi aesthetic */
+
+/* =========================================================
+   CUSTOM SCROLLBAR — DARK
+   ========================================================= */
+
 ::-webkit-scrollbar {
+
   width: 7px;
   height: 7px;
 }
+
+
 ::-webkit-scrollbar-track {
+
   background: #060814;
 }
+
+
 ::-webkit-scrollbar-thumb {
+
   background: #1e295d;
+
   border-radius: 4px;
 }
+
+
 ::-webkit-scrollbar-thumb:hover {
+
   background: #38bdf8;
+}
+
+
+/* =========================================================
+   =========================================================
+   LIGHT MODE
+   =========================================================
+   ========================================================= */
+
+html.light {
+
+  background: #ffffff !important;
+
+  color: #000000 !important;
+
+  color-scheme: light;
+}
+
+
+html.light body {
+
+  background:
+    #ffffff !important;
+
+  background-image:
+    none !important;
+
+  color:
+    #000000 !important;
+
+  min-height: 100vh;
+}
+
+
+html.light #root {
+
+  background:
+    #ffffff !important;
+
+  color:
+    #000000 !important;
+
+  min-height: 100vh;
+}
+
+
+/* =========================================================
+   LIGHT MODE — TEXT
+   ========================================================= */
+
+html.light .text-white {
+
+  color: #000000 !important;
+}
+
+
+html.light .text-slate-50 {
+
+  color: #111827 !important;
+}
+
+
+html.light .text-slate-100 {
+
+  color: #111827 !important;
+}
+
+
+html.light .text-slate-200 {
+
+  color: #1f2937 !important;
+}
+
+
+html.light .text-slate-300 {
+
+  color: #374151 !important;
+}
+
+
+html.light .text-slate-400 {
+
+  color: #4b5563 !important;
+}
+
+
+html.light .text-slate-500 {
+
+  color: #6b7280 !important;
+}
+
+
+html.light .text-slate-600 {
+
+  color: #4b5563 !important;
+}
+
+
+html.light .text-slate-700 {
+
+  color: #374151 !important;
+}
+
+
+html.light .text-slate-800 {
+
+  color: #1f2937 !important;
+}
+
+
+html.light .text-slate-900 {
+
+  color: #111827 !important;
+}
+
+
+/* =========================================================
+   LIGHT MODE — DARK BACKGROUND CLASSES
+   ========================================================= */
+
+html.light .bg-\[\#060814\] {
+
+  background-color:
+    #ffffff !important;
+}
+
+
+html.light .bg-\[\#081024\] {
+
+  background-color:
+    #ffffff !important;
+}
+
+
+html.light .bg-\[\#080d24\] {
+
+  background-color:
+    #ffffff !important;
+}
+
+
+html.light .bg-\[\#0a1024\] {
+
+  background-color:
+    #ffffff !important;
+}
+
+
+html.light .bg-\[\#0b1228\] {
+
+  background-color:
+    #ffffff !important;
+}
+
+
+html.light .bg-\[\#0d1428\] {
+
+  background-color:
+    #ffffff !important;
+}
+
+
+html.light .bg-slate-950 {
+
+  background-color:
+    #ffffff !important;
+}
+
+
+html.light .bg-slate-900 {
+
+  background-color:
+    #ffffff !important;
+}
+
+
+html.light .bg-slate-800 {
+
+  background-color:
+    #f8fafc !important;
+}
+
+
+/* =========================================================
+   LIGHT MODE — CARDS
+   ========================================================= */
+
+html.light .cyber-card {
+
+  background:
+    rgba(255, 255, 255, 0.96) !important;
+
+  border:
+    1px solid #d1d5db !important;
+
+  box-shadow:
+    0 4px 18px rgba(15, 23, 42, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.8) !important;
+}
+
+
+html.light .cyber-card-glow {
+
+  background:
+    #ffffff !important;
+
+  border:
+    1px solid rgba(14, 165, 233, 0.35) !important;
+
+  box-shadow:
+    0 4px 20px rgba(14, 165, 233, 0.10),
+    0 8px 30px rgba(15, 23, 42, 0.08) !important;
+}
+
+
+/* =========================================================
+   LIGHT MODE — COMMON BORDERS
+   ========================================================= */
+
+html.light .border-slate-700 {
+
+  border-color:
+    #d1d5db !important;
+}
+
+
+html.light .border-slate-800 {
+
+  border-color:
+    #e5e7eb !important;
+}
+
+
+html.light .border-cyan-500\/20 {
+
+  border-color:
+    rgba(6, 182, 212, 0.25) !important;
+}
+
+
+html.light .border-cyan-500\/15 {
+
+  border-color:
+    rgba(6, 182, 212, 0.20) !important;
+}
+
+
+html.light .border-cyan-900\/60 {
+
+  border-color:
+    rgba(14, 116, 144, 0.25) !important;
+}
+
+
+/* =========================================================
+   LIGHT MODE — INPUTS
+   ========================================================= */
+
+html.light input,
+html.light textarea,
+html.light select {
+
+  background-color:
+    #ffffff !important;
+
+  color:
+    #000000 !important;
+
+  border-color:
+    #d1d5db !important;
+}
+
+
+html.light input::placeholder,
+html.light textarea::placeholder {
+
+  color:
+    #6b7280 !important;
+}
+
+
+html.light input:focus,
+html.light textarea:focus,
+html.light select:focus {
+
+  border-color:
+    #06b6d4 !important;
+
+  outline-color:
+    #06b6d4 !important;
+}
+
+
+/* =========================================================
+   LIGHT MODE — BUTTONS
+   ========================================================= */
+
+html.light button {
+
+  transition:
+    background-color 0.2s ease,
+    color 0.2s ease,
+    border-color 0.2s ease;
+}
+
+
+/* =========================================================
+   LIGHT MODE — CYBER BADGES
+   ========================================================= */
+
+html.light .cyber-badge-cyan {
+
+  background:
+    rgba(14, 165, 233, 0.08);
+
+  color:
+    #0369a1;
+
+  border-color:
+    rgba(14, 165, 233, 0.35);
+
+  box-shadow:
+    none;
+}
+
+
+html.light .cyber-badge-purple {
+
+  background:
+    rgba(147, 51, 234, 0.08);
+
+  color:
+    #7e22ce;
+
+  border-color:
+    rgba(147, 51, 234, 0.30);
+
+  box-shadow:
+    none;
+}
+
+
+/* =========================================================
+   LIGHT MODE — CYBER GRID
+   ========================================================= */
+
+html.light .bg-cyber-grid {
+
+  background-image:
+    linear-gradient(
+      to right,
+      rgba(15, 23, 42, 0.045) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      to bottom,
+      rgba(15, 23, 42, 0.045) 1px,
+      transparent 1px
+    );
+}
+
+
+/* =========================================================
+   LIGHT MODE — NEON HEADINGS
+   ========================================================= */
+
+html.light .neon-glow-heading {
+
+  text-shadow:
+    0 0 8px rgba(14, 165, 233, 0.25),
+    0 0 18px rgba(14, 165, 233, 0.12);
+}
+
+
+html.light .neon-glow-cyan {
+
+  text-shadow:
+    0 0 6px rgba(6, 182, 212, 0.20);
+}
+
+
+html.light .neon-glow-purple {
+
+  text-shadow:
+    0 0 6px rgba(147, 51, 234, 0.15);
+}
+
+
+/* =========================================================
+   LIGHT MODE — HOVER EFFECT
+   ========================================================= */
+
+html.light .card-hover-glow:hover {
+
+  border-color:
+    rgba(14, 165, 233, 0.55) !important;
+
+  box-shadow:
+    0 8px 25px rgba(14, 165, 233, 0.12),
+    0 4px 15px rgba(15, 23, 42, 0.08) !important;
+}
+
+
+html.light .box-interactive-glow:hover {
+
+  border-color:
+    rgba(6, 182, 212, 0.55) !important;
+
+  box-shadow:
+    0 8px 25px rgba(6, 182, 212, 0.12) !important;
+}
+
+
+/* =========================================================
+   LIGHT MODE — SVG / ICONS
+   ========================================================= */
+
+html.light svg {
+
+  opacity: 1;
+}
+
+
+/* =========================================================
+   LIGHT MODE — LINKS
+   ========================================================= */
+
+html.light a {
+
+  color:
+    #0369a1;
+}
+
+
+html.light a:hover {
+
+  color:
+    #0284c7;
+}
+
+
+/* =========================================================
+   LIGHT MODE — TABLES
+   ========================================================= */
+
+html.light table {
+
+  color:
+    #000000;
+}
+
+
+html.light th {
+
+  background:
+    #f8fafc !important;
+
+  color:
+    #111827 !important;
+
+  border-color:
+    #e5e7eb !important;
+}
+
+
+html.light td {
+
+  border-color:
+    #e5e7eb !important;
+
+  color:
+    #1f2937 !important;
+}
+
+
+/* =========================================================
+   LIGHT MODE — SCROLLBAR
+   ========================================================= */
+
+html.light ::-webkit-scrollbar-track {
+
+  background:
+    #ffffff;
+}
+
+
+html.light ::-webkit-scrollbar-thumb {
+
+  background:
+    #cbd5e1;
+
+  border-radius:
+    4px;
+}
+
+
+html.light ::-webkit-scrollbar-thumb:hover {
+
+  background:
+    #94a3b8;
+}
+
+
+/* =========================================================
+   LIGHT MODE — SELECTION
+   ========================================================= */
+
+html.light ::selection {
+
+  background:
+    #bae6fd;
+
+  color:
+    #000000;
+}
+
+
+/* =========================================================
+   LIGHT MODE — MAP SAFETY
+   Keep Leaflet map tiles and controls visually usable.
+   ========================================================= */
+
+html.light .leaflet-container {
+
+  background:
+    #e5e7eb !important;
+}
+
+
+html.light .leaflet-control {
+
+  color:
+    #111827 !important;
+}
+
+
+html.light .leaflet-control-zoom a {
+
+  background:
+    #ffffff !important;
+
+  color:
+    #111827 !important;
+
+  border-color:
+    #d1d5db !important;
+}
+
+
+html.light .leaflet-popup-content-wrapper,
+html.light .leaflet-popup-tip {
+
+  background:
+    #ffffff !important;
+
+  color:
+    #111827 !important;
+}
+
+
+/* =========================================================
+   THEME TRANSITION
+   ========================================================= */
+
+html,
+body,
+#root {
+
+  transition:
+    background-color 0.25s ease,
+    color 0.25s ease;
 }
