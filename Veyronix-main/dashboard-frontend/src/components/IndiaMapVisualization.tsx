@@ -1918,6 +1918,43 @@ export const IndiaMapVisualization: React.FC<
 
   /*
    * ============================================================
+   * OPEN SELECTED EVENT IN GOOGLE MAPS
+   * ============================================================
+   *
+   * Opens the exact latitude/longitude of the selected
+   * thermal event in Google Maps in a new browser tab.
+   */
+  const handleOpenGoogleMaps = () => {
+    if (!selectedEvent) {
+      return;
+    }
+
+    const lat = Number(selectedEvent.lat);
+    const lng = Number(selectedEvent.lng);
+
+    if (
+      !Number.isFinite(lat) ||
+      !Number.isFinite(lng) ||
+      lat < -90 ||
+      lat > 90 ||
+      lng < -180 ||
+      lng > 180
+    ) {
+      return;
+    }
+
+    const googleMapsUrl =
+      `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
+
+    window.open(
+      googleMapsUrl,
+      '_blank',
+      'noopener,noreferrer',
+    );
+  };
+
+  /*
+   * ============================================================
    * RENDER
    * ============================================================
    */
@@ -2232,6 +2269,51 @@ export const IndiaMapVisualization: React.FC<
                 `}
               >
                 OSM
+              </button>
+
+              {/* GOOGLE MAPS — EXACT SELECTED EVENT LOCATION */}
+
+              <button
+                type="button"
+                onClick={handleOpenGoogleMaps}
+                disabled={!selectedEvent}
+                className={`
+                  px-2
+                  py-1
+                  rounded-md
+                  text-[11px]
+                  font-medium
+                  flex
+                  items-center
+                  gap-1
+                  transition-all
+                  ${
+                    selectedEvent
+                      ? `
+                        text-slate-200
+                        hover:bg-red-500/20
+                        hover:text-red-300
+                      `
+                      : `
+                        text-slate-600
+                        cursor-not-allowed
+                        opacity-50
+                      `
+                  }
+                `}
+                title={
+                  selectedEvent
+                    ? 'Open selected event exact location in Google Maps'
+                    : 'Select an event first'
+                }
+              >
+                <MapPin
+                  className="
+                    w-3
+                    h-3
+                  "
+                />
+                Google
               </button>
 
             </div>
