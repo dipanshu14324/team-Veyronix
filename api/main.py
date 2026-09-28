@@ -19,7 +19,7 @@ from pydantic import BaseModel
 # ============================================================
 
 APP_NAME = "VEYRONIX AI"
-APP_VERSION = "2.3.0"
+APP_VERSION = "2.4.0"
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -167,6 +167,7 @@ def safe_float(
         number = float(value)
 
         if np.isfinite(number):
+
             return number
 
         return default
@@ -194,20 +195,71 @@ def safe_bool(
     value: Any,
 ) -> bool:
 
-    if isinstance(value, bool):
+    if value is None:
+
+        return False
+
+    # --------------------------------------------------------
+    # Handle NaN / infinity safely
+    # --------------------------------------------------------
+
+    try:
+
+        if isinstance(
+            value,
+            (float, np.floating),
+        ):
+
+            number = float(value)
+
+            if not np.isfinite(number):
+
+                return False
+
+    except Exception:
+
+        pass
+
+    # --------------------------------------------------------
+    # Boolean
+    # --------------------------------------------------------
+
+    if isinstance(
+        value,
+        bool,
+    ):
+
         return value
 
-    if isinstance(value, (int, float)):
+    # --------------------------------------------------------
+    # Numeric
+    # --------------------------------------------------------
+
+    if isinstance(
+        value,
+        (int, np.integer),
+    ):
+
         return bool(value)
 
-    if isinstance(value, str):
+    # --------------------------------------------------------
+    # String
+    # --------------------------------------------------------
 
-        return value.lower().strip() in {
-            "true",
-            "1",
-            "yes",
-            "y",
-        }
+    if isinstance(
+        value,
+        str,
+    ):
+
+        return (
+            value.lower().strip()
+            in {
+                "true",
+                "1",
+                "yes",
+                "y",
+            }
+        )
 
     return False
 
@@ -220,7 +272,10 @@ def clamp(
 
     return max(
         minimum,
-        min(maximum, value),
+        min(
+            maximum,
+            value,
+        ),
     )
 
 
@@ -228,39 +283,56 @@ def json_safe(
     value: Any,
 ) -> Any:
 
-    if isinstance(value, np.integer):
+    if isinstance(
+        value,
+        np.integer,
+    ):
 
         return int(value)
 
-    if isinstance(value, np.floating):
+    if isinstance(
+        value,
+        np.floating,
+    ):
 
         value = float(value)
 
         if not np.isfinite(value):
+
             return None
 
         return value
 
-    if isinstance(value, np.ndarray):
+    if isinstance(
+        value,
+        np.ndarray,
+    ):
 
         return value.tolist()
 
-    if isinstance(value, pd.Timestamp):
+    if isinstance(
+        value,
+        pd.Timestamp,
+    ):
 
         if pd.isna(value):
+
             return None
 
         return value.isoformat()
 
     if value is None:
+
         return None
 
     try:
 
         if pd.isna(value):
+
             return None
 
     except Exception:
+
         pass
 
     return value
@@ -288,229 +360,6 @@ def dataframe_to_records(
         )
 
     return cleaned
-
-
-# ============================================================
-# FRONTEND EVENT FORMAT
-# ============================================================
-
-def format_event(
-    event: dict[str, Any],
-) -> dict[str, Any]:
-
-    event_id = safe_int(
-        event.get("event_id")
-    )
-
-    latitude = safe_float(
-        event.get("latitude")
-    )
-
-    longitude = safe_float(
-        event.get("longitude")
-    )
-
-    event_date = event.get(
-        "event_date"
-    )
-
-    start_time = event.get(
-        "start_time"
-    )
-
-    end_time = event.get(
-        "end_time"
-    )
-
-    # --------------------------------------------------------
-    # Event date
-    # --------------------------------------------------------
-
-    if isinstance(
-        event_date,
-        pd.Timestamp,
-    ):
-
-        if pd.isna(event_date):
-
-            event_date_string = None
-
-        else:
-
-            event_date_string = str(
-                event_date.date()
-            )
-
-    elif event_date is None:
-
-        event_date_string = None
-
-    else:
-
-        event_date_string = str(
-            event_date
-        )
-
-    # --------------------------------------------------------
-    # Start time
-    # --------------------------------------------------------
-
-    if (
-        start_time is None
-        or pd.isna(start_time)
-    ):
-
-        start_time_string = None
-
-    else:
-
-        start_time_string = str(
-            start_time
-        )
-
-    # --------------------------------------------------------
-    # End time
-    # --------------------------------------------------------
-
-    if (
-        end_time is None
-        or pd.isna(end_time)
-    ):
-
-        end_time_string = None
-
-    else:
-
-        end_time_string = str(
-            end_time
-        )
-
-    # --------------------------------------------------------
-    # Final frontend object
-    # --------------------------------------------------------
-
-    return {
-        "event_id": event_id,
-
-        "latitude": latitude,
-
-        "longitude": longitude,
-
-        "event_date":
-            event_date_string,
-
-        "start_time":
-            start_time_string,
-
-        "end_time":
-            end_time_string,
-
-        "observation_count":
-            safe_float(
-                event.get(
-                    "observation_count"
-                )
-            ),
-
-        "mean_frp":
-            safe_float(
-                event.get(
-                    "mean_frp"
-                )
-            ),
-
-        "peak_frp":
-            safe_float(
-                event.get(
-                    "peak_frp"
-                )
-            ),
-
-        "total_frp":
-            safe_float(
-                event.get(
-                    "total_frp"
-                )
-            ),
-
-        "mean_brightness":
-            safe_float(
-                event.get(
-                    "mean_brightness"
-                )
-            ),
-
-        "persistent":
-            safe_float(
-                event.get(
-                    "persistent"
-                )
-            ),
-
-        "historical_detection_count":
-            safe_float(
-                event.get(
-                    "historical_detection_count"
-                )
-            ),
-
-        "historical_mean_frp":
-            safe_float(
-                event.get(
-                    "historical_mean_frp"
-                )
-            ),
-
-        "local_frp_deviation":
-            safe_float(
-                event.get(
-                    "local_frp_deviation"
-                )
-            ),
-
-        "historical_daily_activity":
-            safe_float(
-                event.get(
-                    "historical_daily_activity"
-                )
-            ),
-
-        "previously_detected":
-            safe_float(
-                event.get(
-                    "previously_detected"
-                )
-            ),
-
-        "anomaly_score":
-            safe_float(
-                event.get(
-                    "anomaly_score"
-                )
-            ),
-
-        "is_anomaly":
-            safe_bool(
-                event.get(
-                    "is_anomaly"
-                )
-            ),
-
-        "maps": {
-            "google_maps": (
-                "https://www.google.com/maps/search/"
-                f"?api=1&query="
-                f"{latitude},{longitude}"
-            ),
-
-            "openstreetmap": (
-                "https://www.openstreetmap.org/"
-                f"?mlat={latitude}"
-                f"&mlon={longitude}"
-                "&zoom=15"
-            ),
-        },
-    }
 
 
 # ============================================================
@@ -617,7 +466,9 @@ def load_latest_events_cache() -> None:
         )
 
         df = df.dropna(
-            subset=["event_id"]
+            subset=[
+                "event_id"
+            ]
         )
 
         df["event_id"] = (
@@ -680,17 +531,14 @@ def load_latest_events_cache() -> None:
         # ----------------------------------------------------
 
         df = df.drop_duplicates(
-            subset=["event_id"],
+            subset=[
+                "event_id"
+            ],
             keep="last",
         )
 
         # ----------------------------------------------------
         # Keep newest 1000 events
-        #
-        # IMPORTANT:
-        # This cache is NOT the full corpus.
-        # Direct lookup can still search the
-        # complete CSV.
         # ----------------------------------------------------
 
         df = df.tail(1000)
@@ -789,7 +637,10 @@ def load_event_from_dataset(
             chunksize=50000,
         ):
 
-            if "event_id" not in chunk.columns:
+            if (
+                "event_id"
+                not in chunk.columns
+            ):
 
                 continue
 
@@ -1075,6 +926,439 @@ def calculate_priority(
 
 
 # ============================================================
+# FRONTEND EVENT FORMAT
+# ============================================================
+
+def format_event(
+    event: dict[str, Any],
+) -> dict[str, Any]:
+
+    # ========================================================
+    # BASIC DATA
+    # ========================================================
+
+    event_id = safe_int(
+        event.get("event_id")
+    )
+
+    latitude = safe_float(
+        event.get("latitude")
+    )
+
+    longitude = safe_float(
+        event.get("longitude")
+    )
+
+    event_date = event.get(
+        "event_date"
+    )
+
+    start_time = event.get(
+        "start_time"
+    )
+
+    end_time = event.get(
+        "end_time"
+    )
+
+    # --------------------------------------------------------
+    # Event date
+    # --------------------------------------------------------
+
+    if isinstance(
+        event_date,
+        pd.Timestamp,
+    ):
+
+        if pd.isna(event_date):
+
+            event_date_string = None
+
+        else:
+
+            event_date_string = str(
+                event_date.date()
+            )
+
+    elif event_date is None:
+
+        event_date_string = None
+
+    else:
+
+        event_date_string = str(
+            event_date
+        )
+
+    # --------------------------------------------------------
+    # Start time
+    # --------------------------------------------------------
+
+    if (
+        start_time is None
+        or pd.isna(start_time)
+    ):
+
+        start_time_string = None
+
+    else:
+
+        start_time_string = str(
+            start_time
+        )
+
+    # --------------------------------------------------------
+    # End time
+    # --------------------------------------------------------
+
+    if (
+        end_time is None
+        or pd.isna(end_time)
+    ):
+
+        end_time_string = None
+
+    else:
+
+        end_time_string = str(
+            end_time
+        )
+
+    # ========================================================
+    # THERMAL FEATURES
+    # ========================================================
+
+    observation_count = safe_float(
+        event.get(
+            "observation_count"
+        )
+    )
+
+    mean_frp = safe_float(
+        event.get(
+            "mean_frp"
+        )
+    )
+
+    peak_frp = safe_float(
+        event.get(
+            "peak_frp"
+        )
+    )
+
+    total_frp = safe_float(
+        event.get(
+            "total_frp"
+        )
+    )
+
+    mean_brightness = safe_float(
+        event.get(
+            "mean_brightness"
+        )
+    )
+
+    persistent = safe_float(
+        event.get(
+            "persistent"
+        )
+    )
+
+    historical_detection_count = safe_float(
+        event.get(
+            "historical_detection_count"
+        )
+    )
+
+    historical_mean_frp = safe_float(
+        event.get(
+            "historical_mean_frp"
+        )
+    )
+
+    local_frp_deviation = safe_float(
+        event.get(
+            "local_frp_deviation"
+        )
+    )
+
+    historical_daily_activity = safe_float(
+        event.get(
+            "historical_daily_activity"
+        )
+    )
+
+    previously_detected = safe_float(
+        event.get(
+            "previously_detected"
+        )
+    )
+
+    anomaly_score = safe_float(
+        event.get(
+            "anomaly_score"
+        )
+    )
+
+    anomaly = safe_bool(
+        event.get(
+            "is_anomaly"
+        )
+    )
+
+    # ========================================================
+    # ML PREDICTION
+    #
+    # IMPORTANT:
+    # This prediction is now performed for initial /events
+    # data as well.
+    # ========================================================
+
+    prediction = predict_event_source(
+        {
+            "event_id":
+                event_id,
+
+            "latitude":
+                latitude,
+
+            "longitude":
+                longitude,
+
+            "event_date":
+                event_date_string,
+
+            "start_time":
+                start_time_string,
+
+            "end_time":
+                end_time_string,
+
+            "observation_count":
+                observation_count,
+
+            "mean_frp":
+                mean_frp,
+
+            "peak_frp":
+                peak_frp,
+
+            "total_frp":
+                total_frp,
+
+            "mean_brightness":
+                mean_brightness,
+
+            "persistent":
+                persistent,
+
+            "historical_detection_count":
+                historical_detection_count,
+
+            "historical_mean_frp":
+                historical_mean_frp,
+
+            "local_frp_deviation":
+                local_frp_deviation,
+
+            "historical_daily_activity":
+                historical_daily_activity,
+
+            "previously_detected":
+                previously_detected,
+
+            "anomaly_score":
+                anomaly_score,
+
+            "is_anomaly":
+                anomaly,
+        }
+    )
+
+    # ========================================================
+    # PREDICTION VALUES
+    # ========================================================
+
+    predicted_source = prediction.get(
+        "predicted_source",
+        "Uncertain",
+    )
+
+    if not predicted_source:
+
+        predicted_source = "Uncertain"
+
+    confidence = clamp(
+        safe_float(
+            prediction.get(
+                "confidence",
+                0,
+            )
+        ),
+        0,
+        1,
+    )
+
+    probabilities = prediction.get(
+        "probabilities",
+        {},
+    )
+
+    if not isinstance(
+        probabilities,
+        dict,
+    ):
+
+        probabilities = {}
+
+    # ========================================================
+    # INITIAL PRIORITY
+    #
+    # SAME calculation_priority() used by
+    # /event-analysis/{event_id}
+    # ========================================================
+
+    priority, priority_score = (
+        calculate_priority(
+            confidence,
+            anomaly,
+            peak_frp,
+        )
+    )
+
+    # ========================================================
+    # FRONTEND EVENT
+    # ========================================================
+
+    return {
+
+        "event_id":
+            event_id,
+
+        "latitude":
+            latitude,
+
+        "longitude":
+            longitude,
+
+        "event_date":
+            event_date_string,
+
+        "start_time":
+            start_time_string,
+
+        "end_time":
+            end_time_string,
+
+        # ----------------------------------------------------
+        # Thermal data
+        # ----------------------------------------------------
+
+        "observation_count":
+            observation_count,
+
+        "mean_frp":
+            mean_frp,
+
+        "peak_frp":
+            peak_frp,
+
+        "total_frp":
+            total_frp,
+
+        "mean_brightness":
+            mean_brightness,
+
+        "persistent":
+            persistent,
+
+        # ----------------------------------------------------
+        # Historical data
+        # ----------------------------------------------------
+
+        "historical_detection_count":
+            historical_detection_count,
+
+        "historical_mean_frp":
+            historical_mean_frp,
+
+        "local_frp_deviation":
+            local_frp_deviation,
+
+        "historical_daily_activity":
+            historical_daily_activity,
+
+        "previously_detected":
+            previously_detected,
+
+        # ----------------------------------------------------
+        # Anomaly
+        # ----------------------------------------------------
+
+        "anomaly_score":
+            anomaly_score,
+
+        "is_anomaly":
+            anomaly,
+
+        # ----------------------------------------------------
+        # ML attribution
+        # ----------------------------------------------------
+
+        "predicted_source":
+            predicted_source,
+
+        "confidence":
+            confidence,
+
+        "probabilities":
+            probabilities,
+
+        "model_available":
+            prediction.get(
+                "model_available",
+                MODEL_AVAILABLE,
+            ),
+
+        # ----------------------------------------------------
+        # PRIORITY
+        # ----------------------------------------------------
+
+        "priority":
+            priority,
+
+        "investigationPriority":
+            priority,
+
+        "priority_score":
+            priority_score,
+
+        "priorityScore":
+            priority_score,
+
+        # ----------------------------------------------------
+        # MAP LINKS
+        # ----------------------------------------------------
+
+        "maps": {
+
+            "google_maps": (
+                "https://www.google.com/maps/search/"
+                f"?api=1&query="
+                f"{latitude},{longitude}"
+            ),
+
+            "openstreetmap": (
+                "https://www.openstreetmap.org/"
+                f"?mlat={latitude}"
+                f"&mlon={longitude}"
+                "&zoom=15"
+            ),
+        },
+    }
+
+
+# ============================================================
 # ROOT
 # ============================================================
 
@@ -1082,6 +1366,7 @@ def calculate_priority(
 def root():
 
     return {
+
         "service":
             APP_NAME,
 
@@ -1113,6 +1398,7 @@ def root():
 def health():
 
     return {
+
         "status":
             "healthy",
 
@@ -1163,6 +1449,7 @@ def model_info():
     )
 
     return {
+
         "status":
             "success",
 
@@ -1212,9 +1499,9 @@ def events(
             ),
         )
 
-    # --------------------------------------------------------
-    # Fast path
-    # --------------------------------------------------------
+    # ========================================================
+    # FAST PATH
+    # ========================================================
 
     if (
         start_date is None
@@ -1227,6 +1514,10 @@ def events(
             .tail(limit)
             .copy()
         )
+
+    # ========================================================
+    # FILTERED PATH
+    # ========================================================
 
     else:
 
@@ -1246,6 +1537,10 @@ def events(
 
                     continue
 
+                # ------------------------------------------------
+                # Date conversion
+                # ------------------------------------------------
+
                 if (
                     start_date is not None
                     or end_date is not None
@@ -1260,6 +1555,10 @@ def events(
                         errors="coerce",
                     )
 
+                # ------------------------------------------------
+                # Start date
+                # ------------------------------------------------
+
                 if start_date is not None:
 
                     start = pd.Timestamp(
@@ -1269,9 +1568,12 @@ def events(
                     chunk = chunk[
                         chunk[
                             "event_date"
-                        ]
-                        >= start
+                        ] >= start
                     ]
+
+                # ------------------------------------------------
+                # End date
+                # ------------------------------------------------
 
                 if end_date is not None:
 
@@ -1282,8 +1584,7 @@ def events(
                     chunk = chunk[
                         chunk[
                             "event_date"
-                        ]
-                        <= end
+                        ] <= end
                     ]
 
                 if not chunk.empty:
@@ -1291,6 +1592,10 @@ def events(
                     frames.append(
                         chunk
                     )
+
+            # ----------------------------------------------------
+            # Combine
+            # ----------------------------------------------------
 
             if frames:
 
@@ -1328,9 +1633,14 @@ def events(
                 ),
             )
 
+    # ========================================================
+    # EMPTY
+    # ========================================================
+
     if result.empty:
 
         return {
+
             "status":
                 "success",
 
@@ -1341,9 +1651,12 @@ def events(
                 [],
         }
 
-    # --------------------------------------------------------
-    # Build response
-    # --------------------------------------------------------
+    # ========================================================
+    # FORMAT EVENTS
+    #
+    # format_event() now performs ML prediction and
+    # priority calculation before sending data to frontend.
+    # ========================================================
 
     output = []
 
@@ -1351,13 +1664,111 @@ def events(
 
         raw_event = row.to_dict()
 
-        output.append(
-            format_event(
+        try:
+
+            formatted_event = format_event(
                 raw_event
             )
-        )
+
+            output.append(
+                formatted_event
+            )
+
+        except Exception as exc:
+
+            event_id = safe_int(
+                raw_event.get(
+                    "event_id"
+                )
+            )
+
+            print(
+                "[VEYRONIX] Event formatting "
+                f"failed for {event_id}: "
+                f"{exc}"
+            )
+
+            # ------------------------------------------------
+            # Fallback
+            # ------------------------------------------------
+
+            fallback_anomaly = safe_bool(
+                raw_event.get(
+                    "is_anomaly"
+                )
+            )
+
+            fallback_peak_frp = safe_float(
+                raw_event.get(
+                    "peak_frp"
+                )
+            )
+
+            fallback_priority, fallback_score = (
+                calculate_priority(
+                    0.0,
+                    fallback_anomaly,
+                    fallback_peak_frp,
+                )
+            )
+
+            output.append(
+                {
+                    "event_id":
+                        event_id,
+
+                    "latitude":
+                        safe_float(
+                            raw_event.get(
+                                "latitude"
+                            )
+                        ),
+
+                    "longitude":
+                        safe_float(
+                            raw_event.get(
+                                "longitude"
+                            )
+                        ),
+
+                    "peak_frp":
+                        fallback_peak_frp,
+
+                    "is_anomaly":
+                        fallback_anomaly,
+
+                    "predicted_source":
+                        "Uncertain",
+
+                    "confidence":
+                        0.0,
+
+                    "probabilities":
+                        {},
+
+                    "priority":
+                        fallback_priority,
+
+                    "investigationPriority":
+                        fallback_priority,
+
+                    "priority_score":
+                        fallback_score,
+
+                    "priorityScore":
+                        fallback_score,
+
+                    "model_available":
+                        MODEL_AVAILABLE,
+                }
+            )
+
+    # ========================================================
+    # RESPONSE
+    # ========================================================
 
     return {
+
         "status":
             "success",
 
@@ -1378,6 +1789,7 @@ def events(
 def event_by_id(
     event_id: int,
 ):
+
     """
     Fetch one event by ID.
 
@@ -1385,10 +1797,6 @@ def event_by_id(
 
     1. In-memory cache
     2. Full CSV corpus
-
-    This means the dashboard can initially
-    load only 100 events while users can still
-    search the complete VEYRONIX dataset.
     """
 
     if not DATASET_PATH.exists():
@@ -1401,7 +1809,7 @@ def event_by_id(
         )
 
     # --------------------------------------------------------
-    # First search cache
+    # Search cache
     # --------------------------------------------------------
 
     event = get_event_from_cache(
@@ -1409,7 +1817,7 @@ def event_by_id(
     )
 
     # --------------------------------------------------------
-    # Then search complete CSV
+    # Search full corpus
     # --------------------------------------------------------
 
     if event is None:
@@ -1433,7 +1841,7 @@ def event_by_id(
         )
 
     # --------------------------------------------------------
-    # Frontend response
+    # Format
     # --------------------------------------------------------
 
     formatted_event = format_event(
@@ -1441,6 +1849,7 @@ def event_by_id(
     )
 
     return {
+
         "status":
             "success",
 
@@ -1480,7 +1889,41 @@ def predict_event(
         )
     )
 
+    # --------------------------------------------------------
+    # Also expose calculated priority
+    # --------------------------------------------------------
+
+    confidence = safe_float(
+        prediction.get(
+            "confidence",
+            0,
+        )
+    )
+
+    anomaly = safe_bool(
+        event.get(
+            "is_anomaly",
+            False,
+        )
+    )
+
+    peak_frp = safe_float(
+        event.get(
+            "peak_frp",
+            0,
+        )
+    )
+
+    priority, priority_score = (
+        calculate_priority(
+            confidence,
+            anomaly,
+            peak_frp,
+        )
+    )
+
     return {
+
         "status":
             "success",
 
@@ -1488,6 +1931,18 @@ def predict_event(
             event_id,
 
         **prediction,
+
+        "priority":
+            priority,
+
+        "investigationPriority":
+            priority,
+
+        "priority_score":
+            priority_score,
+
+        "priorityScore":
+            priority_score,
     }
 
 
@@ -1542,6 +1997,35 @@ def predict_batch(
             )
         )
 
+        confidence = safe_float(
+            prediction.get(
+                "confidence",
+                0,
+            )
+        )
+
+        anomaly = safe_bool(
+            event.get(
+                "is_anomaly",
+                False,
+            )
+        )
+
+        peak_frp = safe_float(
+            event.get(
+                "peak_frp",
+                0,
+            )
+        )
+
+        priority, priority_score = (
+            calculate_priority(
+                confidence,
+                anomaly,
+                peak_frp,
+            )
+        )
+
         predictions.append(
             {
                 "event_id":
@@ -1551,10 +2035,23 @@ def predict_batch(
                     "success",
 
                 **prediction,
+
+                "priority":
+                    priority,
+
+                "investigationPriority":
+                    priority,
+
+                "priority_score":
+                    priority_score,
+
+                "priorityScore":
+                    priority_score,
             }
         )
 
     return {
+
         "status":
             "success",
 
@@ -1699,6 +2196,7 @@ def event_analysis(
         )
 
     evidence = [
+
         (
             "NASA FIRMS thermal event detected "
             f"at {latitude:.4f}, "
@@ -1751,6 +2249,7 @@ def event_analysis(
     ) * 1000
 
     return {
+
         "status":
             "success",
 
@@ -1793,7 +2292,13 @@ def event_analysis(
         "priority":
             priority,
 
+        "investigationPriority":
+            priority,
+
         "priority_score":
+            priority_score,
+
+        "priorityScore":
             priority_score,
 
         "evidence":
@@ -1809,6 +2314,7 @@ def event_analysis(
             recommendation,
 
         "anomaly": {
+
             "is_anomaly":
                 anomaly,
 
@@ -1817,6 +2323,7 @@ def event_analysis(
         },
 
         "sentinel": {
+
             "status":
                 "pending",
 
@@ -1865,6 +2372,7 @@ def sentinel_event(
         )
 
     return {
+
         "status":
             "success",
 
@@ -1904,6 +2412,7 @@ def sentinel_files(
         )
 
     return {
+
         "status":
             "success",
 
@@ -1943,6 +2452,7 @@ def sentinel_evidence(
         )
 
     return {
+
         "status":
             "success",
 
@@ -1985,6 +2495,7 @@ def sentinel_visualizations(
         )
 
     return {
+
         "status":
             "success",
 
@@ -2025,6 +2536,7 @@ def sentinel_visualization(
         )
 
     return {
+
         "status":
             "success",
 
@@ -2055,6 +2567,7 @@ def sentinel_visualization(
 def server_info():
 
     return {
+
         "service":
             APP_NAME,
 
@@ -2083,6 +2596,7 @@ def server_info():
         ),
 
         "cors": {
+
             "enabled":
                 True,
 
@@ -2094,20 +2608,35 @@ def server_info():
         },
 
         "endpoints": [
+
             "/",
+
             "/health",
+
             "/model-info",
+
             "/events",
+
             "/events/{event_id}",
+
             "/predict",
+
             "/predict-event",
+
             "/predict-batch",
+
             "/event-analysis/{event_id}",
+
             "/sentinel/{event_id}",
+
             "/sentinel/{event_id}/files",
+
             "/sentinel/{event_id}/evidence",
+
             "/sentinel/{event_id}/visualizations",
+
             "/sentinel/{event_id}/visualizations/{visualization_type}",
+
             "/server-info",
         ],
     }
@@ -2132,9 +2661,51 @@ def predict(
         )
     )
 
+    confidence = safe_float(
+        prediction.get(
+            "confidence",
+            0,
+        )
+    )
+
+    anomaly = safe_bool(
+        event_dict.get(
+            "is_anomaly",
+            False,
+        )
+    )
+
+    peak_frp = safe_float(
+        event_dict.get(
+            "peak_frp",
+            0,
+        )
+    )
+
+    priority, priority_score = (
+        calculate_priority(
+            confidence,
+            anomaly,
+            peak_frp,
+        )
+    )
+
     return {
+
         "status":
             "success",
 
         **prediction,
+
+        "priority":
+            priority,
+
+        "investigationPriority":
+            priority,
+
+        "priority_score":
+            priority_score,
+
+        "priorityScore":
+            priority_score,
     }
