@@ -1050,6 +1050,8 @@ export const InvestigationPage: React.FC<
 
           </div>
 
+          {/* REFRESH BUTTON REMOVED */}
+
           <div className="flex flex-wrap items-center gap-2">
 
             <span className="px-3 py-1.5 rounded-xl bg-cyan-950/40 border border-cyan-500/40 text-cyan-300 text-xs font-heading font-bold">
@@ -1063,22 +1065,6 @@ export const InvestigationPage: React.FC<
               <CircleDot className="w-3.5 h-3.5" />
               LIVE EVENT LINK
             </span>
-
-            <button
-              type="button"
-              onClick={refreshEvents}
-              disabled={eventsLoading}
-              className="px-3 py-1.5 rounded-xl bg-[#0f1638] border border-[#1e2a60] text-slate-300 text-xs font-bold flex items-center gap-1.5 hover:border-cyan-400/50 hover:text-cyan-300 disabled:opacity-50"
-            >
-              <RefreshCw
-                className={`w-3.5 h-3.5 ${
-                  eventsLoading
-                    ? 'animate-spin'
-                    : ''
-                }`}
-              />
-              REFRESH
-            </button>
 
           </div>
 
@@ -1157,19 +1143,6 @@ export const InvestigationPage: React.FC<
 
       ) : (
 
-        /*
-         * RESPONSIVE INVESTIGATION LAYOUT
-         *
-         * DESKTOP:
-         *   CASE LIST  = 4 columns
-         *   ACTIVE CASE = 8 columns
-         *
-         * MOBILE:
-         *   CASE LIST = full width
-         *   cards = horizontal scroll
-         *   ACTIVE CASE = full width below cards
-         */
-
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
 
           {/* ================================================== */}
@@ -1187,11 +1160,6 @@ export const InvestigationPage: React.FC<
               speed={25}
             />
 
-            {/* MOBILE:
-                Horizontal scrolling docket.
-                DESKTOP:
-                Normal vertical list.
-            */}
             <div className="flex gap-3 overflow-x-auto pb-2 -mx-1 px-1 snap-x snap-mandatory lg:block lg:overflow-visible lg:pb-0 lg:mx-0 lg:px-0 lg:snap-none">
 
               {displayCases.map(
@@ -1430,20 +1398,26 @@ export const InvestigationPage: React.FC<
             {analysisError && (
               <div className="rounded-xl bg-red-500/5 border border-red-500/30 p-3 flex items-start gap-2 text-xs text-red-300">
                 <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+
                 <div className="min-w-0">
+
                   <div className="font-bold">
                     ML ANALYSIS UNAVAILABLE
                   </div>
+
                   <div className="mt-1 text-red-300/80 break-words">
                     {analysisError}
                   </div>
+
                 </div>
+
               </div>
             )}
 
             {analysis && (
               <div className="rounded-xl bg-emerald-500/5 border border-emerald-500/20 p-3 flex items-center gap-2 text-xs text-emerald-300">
                 <CheckCircle2 className="w-4 h-4 shrink-0" />
+
                 <span>
                   LIVE LightGBM prediction loaded from VEYRONIX API.
                 </span>
@@ -2138,9 +2112,11 @@ function MetricCard({
         className={`flex items-center gap-1.5 text-[10px] uppercase font-heading font-bold ${toneClasses[tone]}`}
       >
         {icon}
+
         <span className="truncate">
           {label}
         </span>
+
       </div>
 
       <div className="text-base sm:text-lg font-bold font-mono text-white mt-1.5 break-words">

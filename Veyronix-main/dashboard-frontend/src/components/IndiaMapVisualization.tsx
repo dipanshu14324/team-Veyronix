@@ -395,6 +395,69 @@ export const IndiaMapVisualization: React.FC<
    * ============================================================
    */
 
+  /*
+   * ============================================================
+   * NORMALIZE EVENT PRIORITY
+   * ============================================================
+   *
+   * Different API/data versions may use:
+   *   investigationPriority
+   *   priority
+   *   priorityLevel
+   *   severity
+   *
+   * We normalize all of them before deciding the marker color.
+   *
+   * COLOR RULE:
+   *   CRITICAL -> RED
+   *   HIGH     -> RED-ORANGE
+   *   MEDIUM   -> ORANGE
+   *   LOW      -> GREEN
+   */
+
+  const normalizePriority = (
+    event: ThermalEvent,
+  ): PriorityLevel => {
+    const rawPriority =
+      (event as any).investigationPriority ??
+      (event as any).priority ??
+      (event as any).priorityLevel ??
+      (event as any).severity ??
+      '';
+
+    const normalized = String(
+      rawPriority,
+    )
+      .trim()
+      .toUpperCase();
+
+    if (normalized === 'CRITICAL') {
+      return 'CRITICAL';
+    }
+
+    if (normalized === 'HIGH') {
+      return 'HIGH';
+    }
+
+    if (normalized === 'MEDIUM' || normalized === 'MODERATE') {
+      return 'MEDIUM';
+    }
+
+    if (normalized === 'LOW') {
+      return 'LOW';
+    }
+
+    // Unknown/missing priority is kept visible as LOW so the map
+    // does not accidentally show an unclassified blue marker.
+    return 'LOW';
+  };
+
+  /*
+   * ============================================================
+   * PRIORITY STYLE
+   * ============================================================
+   */
+
   const getPriorityStyle = (
     priority: PriorityLevel,
   ) => {
@@ -404,7 +467,7 @@ export const IndiaMapVisualization: React.FC<
           color: '#ef4444',
           border: '#b91c1c',
           glow:
-            'rgba(239, 68, 68, 0.75)',
+            'rgba(239, 68, 68, 0.85)',
           label: 'CRITICAL',
         };
 
@@ -413,7 +476,7 @@ export const IndiaMapVisualization: React.FC<
           color: '#f97316',
           border: '#ea580c',
           glow:
-            'rgba(249, 115, 22, 0.75)',
+            'rgba(249, 115, 22, 0.85)',
           label: 'HIGH',
         };
 
@@ -422,26 +485,18 @@ export const IndiaMapVisualization: React.FC<
           color: '#f59e0b',
           border: '#d97706',
           glow:
-            'rgba(245, 158, 11, 0.75)',
+            'rgba(245, 158, 11, 0.85)',
           label: 'MEDIUM',
         };
 
       case 'LOW':
+      default:
         return {
           color: '#10b981',
           border: '#059669',
           glow:
-            'rgba(16, 185, 129, 0.75)',
+            'rgba(16, 185, 129, 0.85)',
           label: 'LOW',
-        };
-
-      default:
-        return {
-          color: '#38bdf8',
-          border: '#0284c7',
-          glow:
-            'rgba(56, 189, 248, 0.75)',
-          label: 'REVIEW',
         };
     }
   };
@@ -1197,9 +1252,12 @@ export const IndiaMapVisualization: React.FC<
           selectedEvent?.id ===
           event.id;
 
+        const priority =
+          normalizePriority(event);
+
         const style =
           getPriorityStyle(
-            event.investigationPriority,
+            priority,
           );
 
         /*
@@ -1918,43 +1976,6 @@ export const IndiaMapVisualization: React.FC<
 
   /*
    * ============================================================
-   * OPEN SELECTED EVENT IN GOOGLE MAPS
-   * ============================================================
-   *
-   * Opens the exact latitude/longitude of the selected
-   * thermal event in Google Maps in a new browser tab.
-   */
-  const handleOpenGoogleMaps = () => {
-    if (!selectedEvent) {
-      return;
-    }
-
-    const lat = Number(selectedEvent.lat);
-    const lng = Number(selectedEvent.lng);
-
-    if (
-      !Number.isFinite(lat) ||
-      !Number.isFinite(lng) ||
-      lat < -90 ||
-      lat > 90 ||
-      lng < -180 ||
-      lng > 180
-    ) {
-      return;
-    }
-
-    const googleMapsUrl =
-      `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
-
-    window.open(
-      googleMapsUrl,
-      '_blank',
-      'noopener,noreferrer',
-    );
-  };
-
-  /*
-   * ============================================================
    * RENDER
    * ============================================================
    */
@@ -2269,51 +2290,6 @@ export const IndiaMapVisualization: React.FC<
                 `}
               >
                 OSM
-              </button>
-
-              {/* GOOGLE MAPS — EXACT SELECTED EVENT LOCATION */}
-
-              <button
-                type="button"
-                onClick={handleOpenGoogleMaps}
-                disabled={!selectedEvent}
-                className={`
-                  px-2
-                  py-1
-                  rounded-md
-                  text-[11px]
-                  font-medium
-                  flex
-                  items-center
-                  gap-1
-                  transition-all
-                  ${
-                    selectedEvent
-                      ? `
-                        text-slate-200
-                        hover:bg-red-500/20
-                        hover:text-red-300
-                      `
-                      : `
-                        text-slate-600
-                        cursor-not-allowed
-                        opacity-50
-                      `
-                  }
-                `}
-                title={
-                  selectedEvent
-                    ? 'Open selected event exact location in Google Maps'
-                    : 'Select an event first'
-                }
-              >
-                <MapPin
-                  className="
-                    w-3
-                    h-3
-                  "
-                />
-                Google
               </button>
 
             </div>
@@ -2870,12 +2846,34 @@ export const IndiaMapVisualization: React.FC<
                         rounded
                         text-[10px]
                         font-bold
-                        bg-red-500/30
-                        border
-                        border-red-500
-                        text-red-300
                       "
+                      style={{
+                        color:
+                          getPriorityStyle(
+                            normalizePriority(
+                              selectedEvent,
+                            ),
+                          ).color,
+                        backgroundColor:
+                          `${getPriorityStyle(
+                            normalizePriority(
+                              selectedEvent,
+                            ),
+                          ).color}26`,
+                        border:
+                          `1px solid ${getPriorityStyle(
+                            normalizePriority(
+                              selectedEvent,
+                            ),
+                          ).border}`,
+                      }}
                     >
+                      {getPriorityStyle(
+                        normalizePriority(
+                          selectedEvent,
+                        ),
+                      ).label}
+                      {' • '}
                       {typeof selectedEvent.frpMw ===
                       'number'
                         ? selectedEvent.frpMw.toFixed(
