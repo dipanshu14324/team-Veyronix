@@ -88,7 +88,7 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
             type="text"
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
-            placeholder="Search UP thermal anomalies, NASA FIRMS IDs, districts (e.g. EVT-1040, Sonbhadra, Mathura)..."
+            placeholder="Search thermal anomalies, NASA FIRMS IDs, districts (e.g. EVT-1040, Sonbhadra, Mathura)..."
             className="w-full pl-9 pr-4 py-1.5 rounded-xl bg-[#0a0f2e] border border-[#1e2b66] text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400/70 focus:ring-1 focus:ring-cyan-400/40 shadow-inner"
           />
           {searchQuery && (
