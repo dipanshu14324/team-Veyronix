@@ -1,14 +1,13 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Search,
   Bell,
   User,
-  ShieldCheck,
   ChevronDown,
   X,
-  AlertTriangle,
   Menu,
-  Database,
+  Sun,
+  Moon,
 } from 'lucide-react';
 import { AppPage } from '../types';
 
@@ -19,6 +18,9 @@ interface TopNavbarProps {
   onNavigate: (page: AppPage) => void;
   onLogout: () => void;
   onToggleMobileSidebar: () => void;
+
+  // Kept optional so existing parent component does not break.
+  // APIs & Sources button is no longer rendered.
   onOpenApiModal?: () => void;
 }
 
@@ -29,10 +31,49 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
   onNavigate,
   onLogout,
   onToggleMobileSidebar,
-  onOpenApiModal,
 }) => {
   const [showNotifications, setShowNotifications] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
+
+  // ============================================================
+  // THEME STATE
+  // ============================================================
+
+  const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return true;
+
+    const savedTheme = localStorage.getItem('veyronix-theme');
+
+    if (savedTheme === 'light') {
+      return false;
+    }
+
+    return true;
+  });
+
+  // ============================================================
+  // APPLY THEME
+  // ============================================================
+
+  useEffect(() => {
+    const root = document.documentElement;
+
+    if (isDarkMode) {
+      root.classList.add('dark');
+      root.classList.remove('light');
+
+      localStorage.setItem('veyronix-theme', 'dark');
+    } else {
+      root.classList.add('light');
+      root.classList.remove('dark');
+
+      localStorage.setItem('veyronix-theme', 'light');
+    }
+  }, [isDarkMode]);
+
+  // ============================================================
+  // NOTIFICATIONS
+  // ============================================================
 
   const notifications = [
     {
@@ -58,43 +99,204 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
     },
   ];
 
+  // ============================================================
+  // THEME TOGGLE
+  // ============================================================
+
+  const toggleTheme = () => {
+    setIsDarkMode((previous) => !previous);
+  };
+
   return (
-    <header className="h-16 bg-[#070b20]/95 backdrop-blur-md border-b border-[#17224d] px-4 sm:px-6 flex items-center justify-between gap-3 shrink-0 relative z-30 select-text">
-      {/* Left: Mobile menu button & breadcrumbs */}
-      <div className="flex items-center gap-3">
+    <header
+      className={`
+        h-16
+        w-full
+        flex
+        items-center
+        justify-between
+        gap-2
+        sm:gap-3
+        shrink-0
+        relative
+        z-30
+        select-text
+        px-2.5
+        sm:px-4
+        md:px-6
+        border-b
+        backdrop-blur-md
+        transition-all
+        duration-300
+
+        ${
+          isDarkMode
+            ? 'bg-[#070b20]/95 border-[#17224d]'
+            : 'bg-white/95 border-slate-200'
+        }
+      `}
+    >
+      {/* ====================================================== */}
+      {/* LEFT: MOBILE MENU + BREADCRUMBS */}
+      {/* ====================================================== */}
+
+      <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+        {/* Mobile Menu */}
+
         <button
           onClick={onToggleMobileSidebar}
-          className="md:hidden p-2 rounded-xl text-slate-300 hover:text-white hover:bg-[#0e163d] cursor-pointer"
+          className={`
+            md:hidden
+            shrink-0
+            rounded-xl
+            p-2
+            cursor-pointer
+            transition-all
+
+            ${
+              isDarkMode
+                ? 'text-slate-300 hover:text-white hover:bg-[#0e163d]'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+            }
+          `}
+          aria-label="Open navigation menu"
         >
           <Menu className="w-5 h-5" />
         </button>
 
-        <div className="flex items-center gap-2 text-xs font-semibold text-slate-400">
-          <span className="font-heading font-bold text-white text-sm capitalize neon-glow-cyan">
+        {/* Breadcrumbs */}
+
+        <div className="flex min-w-0 items-center gap-2 text-xs font-semibold">
+          <span
+            className={`
+              max-w-[110px]
+              truncate
+              font-heading
+              font-bold
+              text-sm
+              capitalize
+              transition-colors
+
+              ${
+                isDarkMode
+                  ? 'text-white neon-glow-cyan'
+                  : 'text-slate-900'
+              }
+            `}
+          >
             {currentPage.replace('-', ' ')}
           </span>
-          <span className="text-slate-600">/</span>
-          <span className="hidden sm:inline text-[11px] font-heading tracking-widest text-cyan-400/80">
+
+          <span
+            className={
+              isDarkMode ? 'text-slate-600' : 'text-slate-300'
+            }
+          >
+            /
+          </span>
+
+          <span
+            className={`
+              hidden
+              text-[11px]
+              font-heading
+              tracking-widest
+              sm:inline
+
+              ${
+                isDarkMode
+                  ? 'text-cyan-400/80'
+                  : 'text-cyan-600'
+              }
+            `}
+          >
             SATELLITE COMMAND
           </span>
         </div>
       </div>
 
-      {/* Center: Search Box */}
-      <div className="flex-1 max-w-md hidden sm:block">
+      {/* ====================================================== */}
+      {/* CENTER: SEARCH BOX */}
+      {/* ====================================================== */}
+
+      <div className="hidden min-w-0 flex-1 sm:block sm:max-w-[250px] md:max-w-md lg:max-w-lg">
         <div className="relative">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+          <Search
+            className={`
+              absolute
+              left-3
+              top-1/2
+              -translate-y-1/2
+              w-4
+              h-4
+              pointer-events-none
+
+              ${
+                isDarkMode
+                  ? 'text-slate-400'
+                  : 'text-slate-500'
+              }
+            `}
+          />
+
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
-            placeholder="Search thermal anomalies, NASA FIRMS IDs, districts (e.g. EVT-1040, Sonbhadra, Mathura)..."
-            className="w-full pl-9 pr-4 py-1.5 rounded-xl bg-[#0a0f2e] border border-[#1e2b66] text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400/70 focus:ring-1 focus:ring-cyan-400/40 shadow-inner"
+            placeholder="Search thermal anomalies, NASA FIRMS IDs..."
+            className={`
+              w-full
+              pl-9
+              pr-9
+              py-1.5
+              rounded-xl
+              border
+              text-xs
+              focus:outline-none
+              focus:ring-1
+              transition-all
+
+              ${
+                isDarkMode
+                  ? `
+                    bg-[#0a0f2e]
+                    border-[#1e2b66]
+                    text-white
+                    placeholder-slate-500
+                    focus:border-cyan-400/70
+                    focus:ring-cyan-400/40
+                  `
+                  : `
+                    bg-slate-50
+                    border-slate-300
+                    text-slate-900
+                    placeholder-slate-400
+                    focus:border-cyan-500
+                    focus:ring-cyan-400/30
+                  `
+              }
+            `}
           />
+
+          {/* Clear Search */}
+
           {searchQuery && (
             <button
               onClick={() => onSearchChange('')}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+              className={`
+                absolute
+                right-2.5
+                top-1/2
+                -translate-y-1/2
+                transition-colors
+
+                ${
+                  isDarkMode
+                    ? 'text-slate-400 hover:text-white'
+                    : 'text-slate-400 hover:text-slate-700'
+                }
+              `}
+              aria-label="Clear search"
             >
               <X className="w-3.5 h-3.5" />
             </button>
@@ -102,48 +304,234 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
         </div>
       </div>
 
-      {/* Right Controls */}
-      <div className="flex items-center gap-2.5 sm:gap-3">
-        {/* API Info / Setup Button */}
-        {onOpenApiModal && (
-          <button
-            onClick={onOpenApiModal}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-cyan-950/60 border border-cyan-400/50 hover:bg-cyan-500/20 text-cyan-300 text-xs font-heading font-semibold transition-all shadow-[0_0_12px_rgba(6,182,212,0.25)] cursor-pointer"
-            title="Live Satellite & GIS APIs (Operational out-of-the-box)"
-          >
-            <Database className="w-3.5 h-3.5 text-cyan-400" />
-            <span className="hidden sm:inline">APIs &amp; Sources</span>
-          </button>
-        )}
+      {/* ====================================================== */}
+      {/* RIGHT CONTROLS */}
+      {/* ====================================================== */}
 
-        {/* System Online Status Pill */}
-        <div className="hidden lg:flex items-center gap-2 px-3 py-1 rounded-full bg-[#0a0f2e] border border-cyan-500/30 text-[11px] font-heading font-semibold text-cyan-300 shadow-[0_0_12px_rgba(6,182,212,0.2)]">
-          <span className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_#10b981]" />
-          <span>SATELLITE ONLINE</span>
+      <div className="ml-auto flex shrink-0 items-center gap-1.5 sm:gap-2.5">
+        {/* ================================================== */}
+        {/* SATELLITE ONLINE */}
+        {/* ================================================== */}
+
+        <div
+          className={`
+            flex
+            shrink-0
+            items-center
+            gap-1.5
+            sm:gap-2
+            px-2
+            sm:px-3
+            py-1.5
+            rounded-full
+            border
+            text-[9px]
+            sm:text-[10px]
+            lg:text-[11px]
+            font-heading
+            font-semibold
+            transition-all
+            duration-300
+
+            ${
+              isDarkMode
+                ? `
+                  bg-[#0a0f2e]
+                  border-cyan-500/30
+                  text-cyan-300
+                  shadow-[0_0_12px_rgba(6,182,212,0.2)]
+                `
+                : `
+                  bg-cyan-50
+                  border-cyan-300
+                  text-cyan-700
+                `
+            }
+          `}
+        >
+          <span
+            className="
+              w-2
+              h-2
+              shrink-0
+              rounded-full
+              bg-emerald-400
+              shadow-[0_0_8px_#10b981]
+            "
+          />
+
+          <span className="whitespace-nowrap">
+            SATELLITE ONLINE
+          </span>
         </div>
 
-        {/* Notifications Button */}
+        {/* ================================================== */}
+        {/* LIGHT / DARK MODE */}
+        {/* ================================================== */}
+
+        <button
+          onClick={toggleTheme}
+          type="button"
+          aria-label={
+            isDarkMode
+              ? 'Switch to light mode'
+              : 'Switch to dark mode'
+          }
+          title={
+            isDarkMode
+              ? 'Switch to light mode'
+              : 'Switch to dark mode'
+          }
+          className={`
+            flex
+            h-9
+            w-9
+            sm:h-10
+            sm:w-10
+            shrink-0
+            items-center
+            justify-center
+            rounded-xl
+            border
+            transition-all
+            duration-300
+            cursor-pointer
+
+            ${
+              isDarkMode
+                ? `
+                  bg-[#0a0f2e]
+                  border-[#1e2b66]
+                  text-cyan-300
+                  hover:border-cyan-400/60
+                  hover:bg-cyan-500/10
+                  hover:text-cyan-200
+                `
+                : `
+                  bg-amber-50
+                  border-amber-300
+                  text-amber-600
+                  hover:bg-amber-100
+                  hover:border-amber-400
+                `
+            }
+          `}
+        >
+          {isDarkMode ? (
+            <Sun
+              className="w-4 h-4 sm:w-[18px] sm:h-[18px]"
+              strokeWidth={2}
+            />
+          ) : (
+            <Moon
+              className="w-4 h-4 sm:w-[18px] sm:h-[18px]"
+              strokeWidth={2}
+            />
+          )}
+        </button>
+
+        {/* ================================================== */}
+        {/* NOTIFICATIONS */}
+        {/* ================================================== */}
+
         <div className="relative">
           <button
-            onClick={() => setShowNotifications(!showNotifications)}
-            className="relative p-2 rounded-xl bg-[#0a0f2e] border border-[#1e2b66] text-slate-300 hover:text-white hover:border-cyan-500/50 transition-all cursor-pointer"
+            onClick={() =>
+              setShowNotifications(!showNotifications)
+            }
+            className={`
+              relative
+              p-2
+              rounded-xl
+              border
+              transition-all
+              cursor-pointer
+
+              ${
+                isDarkMode
+                  ? `
+                    bg-[#0a0f2e]
+                    border-[#1e2b66]
+                    text-slate-300
+                    hover:text-white
+                    hover:border-cyan-500/50
+                  `
+                  : `
+                    bg-white
+                    border-slate-300
+                    text-slate-600
+                    hover:text-slate-900
+                    hover:border-cyan-400
+                  `
+              }
+            `}
             title="Recent Alerts"
+            aria-label="Recent Alerts"
           >
             <Bell className="w-4 h-4 text-cyan-400" />
-            <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-cyan-500 text-slate-950 text-[9px] font-bold font-mono flex items-center justify-center shadow-[0_0_8px_#06b6d4]">
+
+            {/* Notification Count */}
+
+            <span
+              className="
+                absolute
+                -top-1
+                -right-1
+                w-4
+                h-4
+                rounded-full
+                bg-cyan-500
+                text-slate-950
+                text-[9px]
+                font-bold
+                font-mono
+                flex
+                items-center
+                justify-center
+                shadow-[0_0_8px_#06b6d4]
+              "
+            >
               3
             </span>
           </button>
 
-          {/* Notifications Dropdown */}
+          {/* ================================================= */}
+          {/* NOTIFICATIONS DROPDOWN */}
+          {/* ================================================= */}
+
           {showNotifications && (
-            <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-[#090e2b] border border-[#1e2c69] rounded-2xl p-3 shadow-2xl z-50 text-xs space-y-2">
+            <div
+              className="
+                absolute
+                right-0
+                mt-2
+                w-[calc(100vw-24px)]
+                max-w-80
+                sm:max-w-96
+                rounded-2xl
+                p-3
+                shadow-2xl
+                z-50
+                text-xs
+                space-y-2
+                bg-[#090e2b]
+                border
+                border-[#1e2c69]
+              "
+            >
+              {/* Header */}
+
               <div className="flex items-center justify-between pb-2 border-b border-[#1b2554]">
                 <span className="font-heading font-bold text-white uppercase tracking-wider text-[11px] neon-glow-cyan">
                   System Alerts
                 </span>
-                <span className="text-[10px] text-cyan-400/80 font-mono">3 unread alerts</span>
+
+                <span className="text-[10px] text-cyan-400/80 font-mono">
+                  3 unread alerts
+                </span>
               </div>
+
+              {/* Alert List */}
 
               <div className="space-y-1.5">
                 {notifications.map((n) => (
@@ -153,16 +541,36 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
                       setShowNotifications(false);
                       onNavigate('events');
                     }}
-                    className="p-2.5 rounded-xl bg-[#050818] hover:bg-[#0e163d] border border-[#192454] cursor-pointer transition-colors space-y-0.5"
+                    className="
+                      p-2.5
+                      rounded-xl
+                      bg-[#050818]
+                      hover:bg-[#0e163d]
+                      border
+                      border-[#192454]
+                      cursor-pointer
+                      transition-colors
+                      space-y-0.5
+                    "
                   >
-                    <div className="flex items-center justify-between">
-                      <span className="font-bold text-white text-[11px] font-heading">{n.title}</span>
-                      <span className="text-[10px] text-slate-400 font-mono">{n.time}</span>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-bold text-white text-[11px] font-heading">
+                        {n.title}
+                      </span>
+
+                      <span className="shrink-0 text-[10px] text-slate-400 font-mono">
+                        {n.time}
+                      </span>
                     </div>
-                    <p className="text-[11px] text-slate-400 leading-snug font-sans-clean">{n.desc}</p>
+
+                    <p className="text-[11px] text-slate-400 leading-snug font-sans-clean">
+                      {n.desc}
+                    </p>
                   </div>
                 ))}
               </div>
+
+              {/* Queue */}
 
               <div className="pt-1 text-center">
                 <button
@@ -170,7 +578,14 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
                     setShowNotifications(false);
                     onNavigate('investigation');
                   }}
-                  className="text-xs text-cyan-400 hover:text-cyan-300 hover:underline font-semibold font-heading"
+                  className="
+                    text-xs
+                    text-cyan-400
+                    hover:text-cyan-300
+                    hover:underline
+                    font-semibold
+                    font-heading
+                  "
                 >
                   View Incident Queue &rarr;
                 </button>
@@ -179,43 +594,178 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
           )}
         </div>
 
-        {/* User Profile Pill */}
+        {/* ================================================== */}
+        {/* USER PROFILE */}
+        {/* ================================================== */}
+
         <div className="relative">
           <button
             onClick={() => setShowUserMenu(!showUserMenu)}
-            className="flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-xl bg-[#0a0f2e] border border-[#1e2b66] hover:border-cyan-500/50 text-xs font-semibold text-white cursor-pointer transition-all"
+            className={`
+              flex
+              items-center
+              gap-1.5
+              sm:gap-2
+              pl-1.5
+              sm:pl-2
+              pr-2
+              sm:pr-3
+              py-1.5
+              rounded-xl
+              border
+              text-xs
+              font-semibold
+              cursor-pointer
+              transition-all
+
+              ${
+                isDarkMode
+                  ? `
+                    bg-[#0a0f2e]
+                    border-[#1e2b66]
+                    text-white
+                    hover:border-cyan-500/50
+                  `
+                  : `
+                    bg-white
+                    border-slate-300
+                    text-slate-800
+                    hover:border-cyan-400
+                  `
+              }
+            `}
           >
-            <div className="w-6 h-6 rounded-full bg-cyan-500/20 border border-cyan-400/50 text-cyan-300 flex items-center justify-center font-bold text-xs">
+            {/* User Icon */}
+
+            <div
+              className={`
+                w-6
+                h-6
+                shrink-0
+                rounded-full
+                border
+                flex
+                items-center
+                justify-center
+                font-bold
+                text-xs
+
+                ${
+                  isDarkMode
+                    ? 'bg-cyan-500/20 border-cyan-400/50 text-cyan-300'
+                    : 'bg-cyan-50 border-cyan-300 text-cyan-600'
+                }
+              `}
+            >
               <User className="w-3.5 h-3.5" />
             </div>
+
+            {/* User Name */}
+
             <div className="text-left hidden sm:block">
-              <div className="text-[11px] font-bold font-heading text-white">Zonal Officer</div>
+              <div
+                className={`
+                  text-[11px]
+                  font-bold
+                  font-heading
+
+                  ${
+                    isDarkMode
+                      ? 'text-white'
+                      : 'text-slate-800'
+                  }
+                `}
+              >
+                Zonal Officer
+              </div>
             </div>
-            <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+
+            <ChevronDown
+              className={`
+                w-3.5
+                h-3.5
+
+                ${
+                  isDarkMode
+                    ? 'text-slate-400'
+                    : 'text-slate-500'
+                }
+              `}
+            />
           </button>
 
-          {/* User Menu Dropdown */}
+          {/* ================================================= */}
+          {/* USER MENU DROPDOWN */}
+          {/* ================================================= */}
+
           {showUserMenu && (
-            <div className="absolute right-0 mt-2 w-48 bg-[#090e2b] border border-[#1e2c69] rounded-xl p-2 shadow-2xl z-50 text-xs space-y-1">
+            <div
+              className="
+                absolute
+                right-0
+                mt-2
+                w-48
+                bg-[#090e2b]
+                border
+                border-[#1e2c69]
+                rounded-xl
+                p-2
+                shadow-2xl
+                z-50
+                text-xs
+                space-y-1
+              "
+            >
+              {/* User Info */}
+
               <div className="px-2.5 py-1.5 border-b border-[#1b2554]">
-                <div className="font-bold font-heading text-white">Triage Command</div>
-                <div className="text-[10px] text-slate-400 font-mono">command@firesight.up.gov.in</div>
+                <div className="font-bold font-heading text-white">
+                  Triage Command
+                </div>
+
+                <div className="text-[10px] text-slate-400 font-mono">
+                  command@firesight.up.gov.in
+                </div>
               </div>
+
+              {/* System Settings */}
+
               <button
                 onClick={() => {
                   setShowUserMenu(false);
                   onNavigate('system');
                 }}
-                className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-[#0e163d] text-slate-300 font-medium"
+                className="
+                  w-full
+                  text-left
+                  px-2.5
+                  py-1.5
+                  rounded-lg
+                  hover:bg-[#0e163d]
+                  text-slate-300
+                  font-medium
+                "
               >
                 System Settings
               </button>
+
+              {/* Logout */}
+
               <button
                 onClick={() => {
                   setShowUserMenu(false);
                   onLogout();
                 }}
-                className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-red-500/20 text-red-400 font-semibold"
+                className="
+                  w-full
+                  text-left
+                  px-2.5
+                  py-1.5
+                  rounded-lg
+                  hover:bg-red-500/20
+                  text-red-400
+                  font-semibold
+                "
               >
                 Log Out
               </button>
