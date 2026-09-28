@@ -11,7 +11,6 @@ import {
   MapPin,
   Flame,
   Check,
-  FileText,
   LocateFixed,
   Satellite,
   Activity,
@@ -1389,14 +1388,17 @@ export const InvestigationPage: React.FC<
             {analysisLoading && (
               <div className="rounded-xl bg-cyan-500/5 border border-cyan-500/30 p-3 flex items-center gap-2 text-xs text-cyan-300">
                 <RefreshCw className="w-4 h-4 animate-spin shrink-0" />
+
                 <span>
                   Running VEYRONIX LightGBM event analysis...
                 </span>
+
               </div>
             )}
 
             {analysisError && (
               <div className="rounded-xl bg-red-500/5 border border-red-500/30 p-3 flex items-start gap-2 text-xs text-red-300">
+
                 <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
 
                 <div className="min-w-0">
@@ -1416,11 +1418,13 @@ export const InvestigationPage: React.FC<
 
             {analysis && (
               <div className="rounded-xl bg-emerald-500/5 border border-emerald-500/20 p-3 flex items-center gap-2 text-xs text-emerald-300">
+
                 <CheckCircle2 className="w-4 h-4 shrink-0" />
 
                 <span>
                   LIVE LightGBM prediction loaded from VEYRONIX API.
                 </span>
+
               </div>
             )}
 
@@ -1449,8 +1453,11 @@ export const InvestigationPage: React.FC<
                       onClick={openMap}
                       className="self-start sm:self-auto px-2.5 py-1 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 text-[10px] font-bold flex items-center gap-1.5 hover:bg-cyan-500 hover:text-slate-950 transition-colors"
                     >
+
                       <ExternalLink className="w-3 h-3" />
+
                       OPEN COORDINATE
+
                     </button>
 
                   </div>
@@ -1730,6 +1737,7 @@ export const InvestigationPage: React.FC<
 
                         <span>
                           Buffer:{' '}
+
                           <strong className="text-slate-200">
                             {formatNumber(
                               activeEvent
@@ -1743,6 +1751,7 @@ export const InvestigationPage: React.FC<
 
                         <span>
                           Nearby facilities:{' '}
+
                           <strong className="text-slate-200">
                             {activeEvent
                               .spatialContext
@@ -1808,6 +1817,7 @@ export const InvestigationPage: React.FC<
                             key={`${activeEvent.id}-evidence-${index}`}
                             className="flex items-start gap-2 text-xs text-slate-200"
                           >
+
                             <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
 
                             <span className="break-words">
@@ -1815,21 +1825,28 @@ export const InvestigationPage: React.FC<
                                 evidence,
                               )}
                             </span>
+
                           </div>
                         ),
                       )
                     ) : analysisLoading ? (
+
                       <div className="text-xs text-slate-500">
                         Waiting for ML evidence...
                       </div>
+
                     ) : analysisError ? (
+
                       <div className="text-xs text-red-300">
                         ML evidence unavailable.
                       </div>
+
                     ) : (
+
                       <div className="text-xs text-slate-500">
                         No additional evidence record is attached to this event.
                       </div>
+
                     )}
 
                     {insufficientEvidence && (
@@ -1858,33 +1875,9 @@ export const InvestigationPage: React.FC<
                     INVESTIGATOR ACTIONS
                   </h3>
 
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
+                  <div className="grid grid-cols-2 gap-2.5">
 
-                    <ActionButton
-                      icon={
-                        <FileText className="w-3.5 h-3.5" />
-                      }
-                      label="Investigating"
-                      onClick={() =>
-                        handleAction(
-                          'INVESTIGATING',
-                          'Case marked as under investigation.',
-                        )
-                      }
-                    />
-
-                    <ActionButton
-                      icon={
-                        <MapPin className="w-3.5 h-3.5" />
-                      }
-                      label="Field request"
-                      onClick={() =>
-                        handleAction(
-                          'FIELD_REQUESTED',
-                          'Field verification requested.',
-                        )
-                      }
-                    />
+                    {/* ADD NOTE */}
 
                     <ActionButton
                       icon={
@@ -1899,6 +1892,8 @@ export const InvestigationPage: React.FC<
                           ?.focus()
                       }
                     />
+
+                    {/* RESOLVE */}
 
                     <ActionButton
                       icon={

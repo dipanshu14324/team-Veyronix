@@ -13,6 +13,10 @@ export interface VeyronixEventsResponse {
   events: Array<Record<string, unknown>>;
 }
 
+/* =========================================================
+   BASIC HELPERS
+   ========================================================= */
+
 function num(
   value: unknown,
   fallback = 0,
@@ -87,8 +91,6 @@ function getProbabilities(
    PRIORITY
    =========================================================
 
-   Backend api/main.py is the source of truth.
-
    Backend thresholds:
 
    85+ = CRITICAL
@@ -154,6 +156,7 @@ function abnormalityFromEvent(
 ): ThermalEvent['abnormality'] {
   const anomaly =
     raw.is_anomaly ??
+    raw.isAnomaly ??
     raw.anomaly ??
     false;
 
@@ -206,6 +209,7 @@ function mapEvent(
   const source = str(
     raw.predicted_source ??
     raw.predictedSource ??
+    raw.likelySource ??
     raw.source,
     'Uncertain',
   );
@@ -225,18 +229,6 @@ function mapEvent(
 
   /* =======================================================
      PRIORITY SCORE
-
-     IMPORTANT:
-
-     Backend gives:
-
-       priority_score
-       priorityScore
-
-     We ALWAYS prefer backend score.
-
-     Only if backend score is completely missing do we
-     fallback to confidence * 100.
      ======================================================= */
 
   const rawPriorityScore =
@@ -266,17 +258,6 @@ function mapEvent(
 
   /* =======================================================
      PRIORITY
-
-     IMPORTANT:
-
-     Backend sends:
-
-       priority
-       investigationPriority
-
-     We prefer those values.
-
-     If they are missing, calculate from priorityScore.
      ======================================================= */
 
   const backendPriority =
@@ -297,23 +278,28 @@ function mapEvent(
 
   const peakFrp = num(
     raw.peak_frp ??
-    raw.mean_frp,
+    raw.peakFrp ??
+    raw.mean_frp ??
+    raw.frpMw,
   );
 
   const meanBrightness = num(
-    raw.mean_brightness,
+    raw.mean_brightness ??
+    raw.brightnessTempK,
   );
 
   const observationCount = num(
-    raw.observation_count,
+    raw.observation_count ??
+    raw.observationCount,
   );
 
-  /* -------------------------------------------------------
+  /* =======================================================
      ANOMALY
-     ------------------------------------------------------- */
+     ======================================================= */
 
   const anomalyValue =
     raw.is_anomaly ??
+    raw.isAnomaly ??
     raw.anomaly ??
     false;
 
@@ -323,13 +309,46 @@ function mapEvent(
     anomalyValue === 1 ||
     anomalyValue === '1';
 
-  const anomalyScore = clamp(
+  /*
+   * IMPORTANT:
+   *
+   * Backend anomaly_score is 0–1.
+   *
+   * Frontend abnormalityScore is displayed as 0–100.
+   *
+   * Keep BOTH versions so AnalyticsPage can use the
+   * original backend value correctly.
+   */
+
+  const rawAnomalyScore =
     num(
-      raw.anomaly_score,
-    ) * 100,
+      raw.anomaly_score ??
+      raw.anomalyScore,
+    );
+
+  const anomalyScore = clamp(
+    rawAnomalyScore * 100,
     0,
     100,
   );
+
+  /* =======================================================
+     LIGHTGBM MODEL STATUS
+     ======================================================= */
+
+  const modelAvailable =
+    raw.model_available === true ||
+    raw.model_available === 'true' ||
+    raw.model_available === 1 ||
+    raw.model_available === '1' ||
+    raw.modelAvailable === true;
+
+  /* =======================================================
+     SOURCE PROBABILITIES
+     ======================================================= */
+
+  const backendProbabilities =
+    getProbabilities(raw);
 
   /* -------------------------------------------------------
      DATE
@@ -337,7 +356,9 @@ function mapEvent(
 
   const eventDate = str(
     raw.event_date ??
-    raw.start_time,
+    raw.eventDate ??
+    raw.start_time ??
+    raw.startTime,
     'Unknown',
   );
 
@@ -385,6 +406,10 @@ function mapEvent(
         'NASA FIRMS',
       ),
 
+    /* =====================================================
+       ANOMALY
+       ===================================================== */
+
     abnormality:
       abnormalityFromEvent(
         raw,
@@ -393,28 +418,113 @@ function mapEvent(
     abnormalityScore:
       anomalyScore,
 
+    /*
+     * Preserve backend anomaly fields.
+     */
+
+    isAnomaly,
+
+    is_anomaly:
+      isAnomaly,
+
+    anomalyScore:
+      rawAnomalyScore,
+
+    anomaly_score:
+      rawAnomalyScore,
+
+    /* =====================================================
+       SOURCE
+       ===================================================== */
+
     likelySource:
+      source,
+
+    predictedSource:
+      source,
+
+    predicted_source:
       source,
 
     /* =====================================================
        PRIORITY
-
-       These values now come directly from backend whenever
-       available.
-
-       Example:
-
-       priority_score: 76
-       priority: HIGH
-
-       → marker should be HIGH immediately.
        ===================================================== */
 
     investigationPriority,
 
+    priority:
+      investigationPriority,
+
     priorityScore,
 
+    priority_score:
+      priorityScore,
+
+    /* =====================================================
+       LIGHTGBM CONFIDENCE
+       ===================================================== */
+
     confidence,
+
+    /* =====================================================
+       MODEL STATUS
+       ===================================================== */
+
+    modelAvailable,
+
+    model_available:
+      modelAvailable,
+
+    /* =====================================================
+       SOURCE PROBABILITIES
+       ===================================================== */
+
+    /*
+     * Existing normalized frontend format.
+     */
+
+    sourceProbabilities:
+      backendProbabilities,
+
+    /*
+     * Backend-compatible format.
+     */
+
+    source_probabilities: {
+      Agriculture_Biomass:
+        backendProbabilities.agricultural,
+
+      Forest_Natural:
+        backendProbabilities.vegetation,
+
+      Industrial:
+        backendProbabilities.industrial,
+
+      Waste_Other:
+        backendProbabilities.other,
+    },
+
+    /*
+     * AnalyticsPage-compatible format.
+     */
+
+    probabilities: {
+      Agriculture_Biomass:
+        backendProbabilities.agricultural,
+
+      Forest_Natural:
+        backendProbabilities.vegetation,
+
+      Industrial:
+        backendProbabilities.industrial,
+
+      Waste_Other:
+        backendProbabilities.other,
+    },
+
+    /* =====================================================
+       EVIDENCE
+       ===================================================== */
 
     insufficientEvidence:
       source === 'Uncertain',
@@ -423,10 +533,6 @@ function mapEvent(
       source === 'Uncertain'
         ? 'Evidence insufficient for reliable attribution.'
         : undefined,
-
-    /* =====================================================
-       EVIDENCE
-       ===================================================== */
 
     evidence: [
       `NASA FIRMS thermal event detected at ${lat.toFixed(4)}, ${lng.toFixed(4)}`,
@@ -446,6 +552,8 @@ function mapEvent(
       `Investigation priority: ${investigationPriority}`,
 
       `Priority score: ${priorityScore}/100`,
+
+      `LightGBM confidence: ${(confidence * 100).toFixed(1)}%`,
     ],
 
     /* =====================================================
@@ -465,15 +573,6 @@ function mapEvent(
       landUseClassification:
         'Not yet matched',
     },
-
-    /* =====================================================
-       SOURCE PROBABILITIES
-       ===================================================== */
-
-    sourceProbabilities:
-      getProbabilities(
-        raw,
-      ),
 
     /* =====================================================
        CONTEXT CARDS
@@ -540,7 +639,36 @@ function mapEvent(
           'PENDING',
       },
     },
-  };
+
+    /* =====================================================
+       RAW ML SNAPSHOT
+       ===================================================== */
+
+    rawML: {
+      predicted_source:
+        source,
+
+      confidence,
+
+      probabilities:
+        backendProbabilities,
+
+      model_available:
+        modelAvailable,
+
+      priority:
+        investigationPriority,
+
+      priority_score:
+        priorityScore,
+
+      is_anomaly:
+        isAnomaly,
+
+      anomaly_score:
+        rawAnomalyScore,
+    },
+  } as ThermalEvent;
 }
 
 /* =========================================================

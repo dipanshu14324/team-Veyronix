@@ -1,71 +1,76 @@
-import React, {
-  useEffect,
-  useMemo,
-  useState,
-} from 'react';
 
+import React, { useMemo, useState } from "react";
 import {
   Activity,
+  AlertTriangle,
   BrainCircuit,
   CheckCircle2,
+  Database,
   Flame,
   Gauge,
   Layers,
-  Loader2,
   ShieldAlert,
   Target,
   TrendingUp,
-  Database,
-} from 'lucide-react';
+} from "lucide-react";
 
-import type { ThermalEvent } from '../../types';
+type ThermalEvent = {
+  id?: string | number;
+  event_id?: string | number;
 
-import { predictVeyronixEvent } from '../../services/veyronixApi';
+  name?: string;
+
+  lat?: number | string;
+  lng?: number | string;
+  latitude?: number | string;
+  longitude?: number | string;
+
+  region?: string;
+  state?: string;
+
+  event_date?: string;
+  eventDate?: string;
+  startTime?: string;
+  start_time?: string;
+
+  confidence?: number | string;
+
+  priority?: string;
+  investigationPriority?: string;
+
+  priority_score?: number | string;
+  priorityScore?: number | string;
+
+  predicted_source?: string;
+  predictedSource?: string;
+  likelySource?: string;
+
+  probabilities?: Record<string, number | string>;
+  source_probabilities?: Record<string, number | string>;
+  sourceProbabilities?: Record<string, number | string>;
+
+  is_anomaly?: boolean | number | string;
+  isAnomaly?: boolean | number | string;
+
+  anomaly_score?: number | string;
+  anomalyScore?: number | string;
+  abnormalityScore?: number | string;
+
+  model_available?: boolean;
+  modelAvailable?: boolean;
+
+  peak_frp?: number | string;
+  mean_frp?: number | string;
+  total_frp?: number | string;
+};
 
 interface AnalyticsPageProps {
   events: ThermalEvent[];
 }
 
 /* ============================================================
-   ML RESPONSE
-   ============================================================ */
-
-interface MLPrediction {
-  status?: string;
-
-  event_id?: number | string;
-
-  predicted_source?: string;
-
-  confidence?: number;
-
-  probabilities?: {
-    Agriculture_Biomass?: number;
-    Forest_Natural?: number;
-    Industrial?: number;
-    Waste_Other?: number;
-
-    agricultural?: number;
-    vegetation?: number;
-    industrial?: number;
-    other?: number;
-  };
-
-  model_available?: boolean;
-}
-
-/* ============================================================
-   ANALYTICS PREDICTION RECORD
-   ============================================================ */
-
-interface PredictionRecord {
-  event: ThermalEvent;
-  prediction: MLPrediction;
-}
-
-/* ============================================================
    HELPERS
-   ============================================================ */
+============================================================ */
 
 function safeNumber(
   value: unknown,
@@ -80,89 +85,60 @@ function safeNumber(
 
 function clamp(
   value: number,
-  min = 0,
-  max = 1,
+  min: number,
+  max: number,
 ): number {
-  return Math.max(
-    min,
-    Math.min(max, value),
+  return Math.min(
+    Math.max(value, min),
+    max,
   );
-}
-
-function normalizeSource(
-  source: unknown,
-): string {
-  const value = String(
-    source ?? '',
-  );
-
-  if (
-    value === 'Industrial'
-  ) {
-    return 'Industrial';
-  }
-
-  if (
-    value ===
-    'Agriculture_Biomass'
-  ) {
-    return 'Agriculture_Biomass';
-  }
-
-  if (
-    value ===
-    'Forest_Natural'
-  ) {
-    return 'Forest_Natural';
-  }
-
-  if (
-    value === 'Waste_Other'
-  ) {
-    return 'Waste_Other';
-  }
-
-  return 'Uncertain';
 }
 
 /* ============================================================
-   DATE PARSER
-   ============================================================ */
+   SOURCE LABEL
+============================================================ */
+
+type SourceLabel =
+  | "Agriculture / Biomass"
+  | "Forest / Natural"
+  | "Industrial"
+  | "Waste / Other"
+  | "Unknown";
+
+/* ============================================================
+   EVENT ID
+============================================================ */
+
+function getEventId(
+  event: ThermalEvent,
+): string {
+  return String(
+    event.id ??
+      event.event_id ??
+      "unknown",
+  );
+}
+
+/* ============================================================
+   EVENT DATE
+============================================================ */
 
 function getEventDate(
   event: ThermalEvent,
 ): Date | null {
   const raw =
-    (
-      event as ThermalEvent & {
-        eventDate?: string;
-        event_date?: string;
-        startTime?: string;
-        start_time?: string;
-      }
-    ).eventDate ??
-    (
-      event as ThermalEvent & {
-        event_date?: string;
-      }
-    ).event_date ??
-    (
-      event as ThermalEvent & {
-        startTime?: string;
-      }
-    ).startTime ??
-    (
-      event as ThermalEvent & {
-        start_time?: string;
-      }
-    ).start_time;
+    event.event_date ??
+    event.eventDate ??
+    event.startTime ??
+    event.start_time;
 
   if (!raw) {
     return null;
   }
 
-  const date =
-    new Date(String(raw));
+  const date = new Date(
+    String(raw),
+  );
 
   if (
     Number.isNaN(
@@ -176,529 +152,819 @@ function getEventDate(
 }
 
 /* ============================================================
-   COMPONENT
-   ============================================================ */
+   CONFIDENCE
+============================================================ */
 
-export const AnalyticsPage: React.FC<
-  AnalyticsPageProps
-> = ({
-  events,
-}) => {
-  const [predictions, setPredictions] =
-    useState<
-      PredictionRecord[]
-    >([]);
+function getConfidence(
+  event: ThermalEvent,
+): number {
+  const value = safeNumber(
+    event.confidence,
+    0,
+  );
 
-  const [isLoadingML, setIsLoadingML] =
-    useState(false);
+  if (value > 1) {
+    return clamp(
+      value / 100,
+      0,
+      1,
+    );
+  }
 
-  const [predictionErrors, setPredictionErrors] =
-    useState(0);
+  return clamp(
+    value,
+    0,
+    1,
+  );
+}
 
-  /* ==========================================================
-     RUN LIGHTGBM FOR THE 100 LOADED EVENTS
-     ========================================================== */
+/* ============================================================
+   PRIORITY
+============================================================ */
 
-  useEffect(() => {
-    let cancelled = false;
+function getPriority(
+  event: ThermalEvent,
+): string {
+  const backendPriority =
+    event.investigationPriority ??
+    event.priority;
 
-    async function loadMLAnalytics() {
-      if (!events.length) {
-        setPredictions([]);
-        return;
-      }
+  if (
+    backendPriority &&
+    String(
+      backendPriority,
+    ).trim()
+  ) {
+    return String(
+      backendPriority,
+    ).toUpperCase();
+  }
 
-      setIsLoadingML(true);
-      setPredictionErrors(0);
+  const confidence =
+    getConfidence(event);
 
-      /*
-       * The application intentionally loads
-       * only the first 100 events.
-       *
-       * Analytics therefore describes those
-       * 100 loaded events, not the full
-       * 439,251-event corpus.
-       */
+  if (confidence >= 0.85) {
+    return "CRITICAL";
+  }
 
-      const results =
-        await Promise.allSettled(
-          events.map(
-            async (event) => {
-              const prediction =
-                (await predictVeyronixEvent(
-                  event.id,
-                )) as MLPrediction;
+  if (confidence >= 0.7) {
+    return "HIGH";
+  }
 
-              return {
-                event,
-                prediction,
-              };
-            },
-          ),
-        );
+  if (confidence >= 0.5) {
+    return "MEDIUM";
+  }
 
-      if (cancelled) {
-        return;
-      }
+  return "LOW";
+}
 
-      const successful: PredictionRecord[] =
-        [];
+/* ============================================================
+   PRIORITY SCORE
+============================================================ */
 
-      let errors = 0;
+function getPriorityScore(
+  event: ThermalEvent,
+): number {
+  const score =
+    event.priorityScore ??
+    event.priority_score;
 
-      results.forEach(
-        (result) => {
-          if (
-            result.status ===
-            'fulfilled'
-          ) {
-            successful.push(
-              result.value,
-            );
-          } else {
-            errors += 1;
-          }
-        },
-      );
+  if (
+    score !== undefined &&
+    score !== null &&
+    score !== ""
+  ) {
+    return clamp(
+      safeNumber(score),
+      0,
+      100,
+    );
+  }
 
-      setPredictions(
-        successful,
-      );
+  return Math.round(
+    getConfidence(event) * 100,
+  );
+}
 
-      setPredictionErrors(
-        errors,
-      );
+/* ============================================================
+   ANOMALY
+============================================================ */
 
-      setIsLoadingML(false);
+function isAnomalyEvent(
+  event: ThermalEvent,
+): boolean {
+  const raw =
+    event.is_anomaly ??
+    event.isAnomaly;
+
+  if (
+    typeof raw ===
+    "boolean"
+  ) {
+    return raw;
+  }
+
+  if (
+    typeof raw ===
+    "number"
+  ) {
+    return raw > 0;
+  }
+
+  if (
+    typeof raw ===
+    "string"
+  ) {
+    const value =
+      raw
+        .trim()
+        .toLowerCase();
+
+    if (
+      value === "true" ||
+      value === "yes" ||
+      value === "1"
+    ) {
+      return true;
     }
 
-    loadMLAnalytics();
+    if (
+      value === "false" ||
+      value === "no" ||
+      value === "0"
+    ) {
+      return false;
+    }
+  }
 
-    return () => {
-      cancelled = true;
-    };
-  }, [events]);
+  const anomalyScore =
+    event.anomaly_score ??
+    event.anomalyScore ??
+    event.abnormalityScore;
 
-  /* ==========================================================
-     TOTAL EVENTS
-     ========================================================== */
+  const score =
+    safeNumber(
+      anomalyScore,
+      0,
+    );
 
-  const totalEvents =
-    events.length;
+  const normalizedScore =
+    score > 1
+      ? score / 100
+      : score;
 
-  /* ==========================================================
-     MODEL COVERAGE
-     ========================================================== */
+  return (
+    normalizedScore >= 0.5
+  );
+}
 
-  const modelCoverage =
-    totalEvents > 0
-      ? (
-          predictions.length /
-          totalEvents
-        ) * 100
-      : 0;
+/* ============================================================
+   LIGHTGBM PROBABILITIES
+============================================================ */
 
-  /* ==========================================================
-     CONFIDENCE
-     ========================================================== */
+function getProbabilityMap(
+  event: ThermalEvent,
+): Record<string, number> {
+  const raw =
+    event.sourceProbabilities ??
+    event.source_probabilities ??
+    event.probabilities ??
+    {};
 
-  const averageConfidence =
-    predictions.length > 0
-      ? predictions.reduce(
-          (
-            sum,
-            item,
-          ) =>
-            sum +
-            safeNumber(
-              item.prediction
-                .confidence,
-            ),
+  const getValue = (
+    ...keys: string[]
+  ) => {
+    for (const key of keys) {
+      if (
+        raw[key] !==
+        undefined
+      ) {
+        const value =
+          safeNumber(
+            raw[key],
+            0,
+          );
+
+        if (value > 1) {
+          return clamp(
+            value / 100,
+            0,
+            1,
+          );
+        }
+
+        return clamp(
+          value,
           0,
-        ) /
-        predictions.length
-      : 0;
+          1,
+        );
+      }
+    }
+
+    return 0;
+  };
+
+  return {
+    Agriculture_Biomass:
+      getValue(
+        "Agriculture_Biomass",
+        "agriculture",
+        "agricultural",
+        "Agriculture / Biomass",
+      ),
+
+    Forest_Natural:
+      getValue(
+        "Forest_Natural",
+        "forest",
+        "natural",
+        "vegetation",
+        "Forest / Natural",
+      ),
+
+    Industrial:
+      getValue(
+        "Industrial",
+        "industrial",
+        "industry",
+      ),
+
+    Waste_Other:
+      getValue(
+        "Waste_Other",
+        "waste",
+        "other",
+        "Waste / Other",
+      ),
+  };
+}
+
+/* ============================================================
+   ACTUAL LIGHTGBM SOURCE
+============================================================ */
+
+function getDynamicSource(
+  event: ThermalEvent,
+): SourceLabel {
+  const probabilities =
+    getProbabilityMap(
+      event,
+    );
+
+  const entries: Array<
+    [SourceLabel, number]
+  > = [
+    [
+      "Agriculture / Biomass",
+      probabilities
+        .Agriculture_Biomass,
+    ],
+    [
+      "Forest / Natural",
+      probabilities
+        .Forest_Natural,
+    ],
+    [
+      "Industrial",
+      probabilities
+        .Industrial,
+    ],
+    [
+      "Waste / Other",
+      probabilities
+        .Waste_Other,
+    ],
+  ];
+
+  const valid =
+    entries.filter(
+      ([, probability]) =>
+        Number.isFinite(
+          probability,
+        ) &&
+        probability > 0,
+    );
+
+  if (
+    valid.length === 0
+  ) {
+    return "Unknown";
+  }
+
+  const highest =
+    valid.reduce(
+      (
+        best,
+        current,
+      ) =>
+        current[1] >
+        best[1]
+          ? current
+          : best,
+    );
+
+  return highest[0];
+}
+
+/* ============================================================
+   MODEL AVAILABILITY
+============================================================ */
+
+function isModelAvailable(
+  event: ThermalEvent,
+): boolean {
+  if (
+    event.model_available !==
+    undefined
+  ) {
+    return (
+      event.model_available ===
+      true
+    );
+  }
+
+  if (
+    event.modelAvailable !==
+    undefined
+  ) {
+    return (
+      event.modelAvailable ===
+      true
+    );
+  }
+
+  const probabilities =
+    getProbabilityMap(
+      event,
+    );
+
+  return Object.values(
+    probabilities,
+  ).some(
+    (value) =>
+      value > 0,
+  );
+}
+
+/* ============================================================
+   DATE FORMAT
+============================================================ */
+
+function formatDate(
+  date: Date | null,
+): string {
+  if (!date) {
+    return "Unknown";
+  }
+
+  return date.toLocaleDateString(
+    "en-IN",
+    {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    },
+  );
+}
+
+/* ============================================================
+   CONFIDENCE FORMAT
+============================================================ */
+
+function formatConfidence(
+  value: number,
+): string {
+  return `${Math.round(
+    value * 100,
+  )}%`;
+}
+
+/* ============================================================
+   MAIN COMPONENT
+============================================================ */
+
+export function AnalyticsPage({
+  events,
+}: AnalyticsPageProps) {
+  const [
+    selectedSource,
+    setSelectedSource,
+  ] = useState<
+    string | null
+  >(null);
 
   /* ==========================================================
-     PRIORITY
-     ========================================================== */
+     NORMALIZE EVENTS
+  ========================================================== */
 
-  const priorityCounts =
+  const normalizedEvents =
     useMemo(() => {
-      let critical = 0;
-      let high = 0;
-      let medium = 0;
-      let low = 0;
-
-      predictions.forEach(
-        ({
-          prediction,
-        }) => {
-          const confidence =
-            safeNumber(
-              prediction.confidence,
+      return events.map(
+        (event) => {
+          const probabilities =
+            getProbabilityMap(
+              event,
             );
 
-          if (
-            confidence >=
-            0.85
-          ) {
-            critical += 1;
-          } else if (
-            confidence >=
-            0.70
-          ) {
-            high += 1;
-          } else if (
-            confidence >=
-            0.50
-          ) {
-            medium += 1;
-          } else {
-            low += 1;
-          }
+          const dynamicSource =
+            getDynamicSource(
+              event,
+            );
+
+          return {
+            ...event,
+
+            eventId:
+              getEventId(event),
+
+            confidence:
+              getConfidence(event),
+
+            priority:
+              getPriority(event),
+
+            priorityScore:
+              getPriorityScore(
+                event,
+              ),
+
+            dynamicSource,
+
+            probabilities,
+
+            anomaly:
+              isAnomalyEvent(
+                event,
+              ),
+
+            date:
+              getEventDate(
+                event,
+              ),
+
+            mlAvailable:
+              isModelAvailable(
+                event,
+              ),
+          };
         },
       );
-
-      return {
-        critical,
-        high,
-        medium,
-        low,
-      };
-    }, [predictions]);
-
-  const actionableEvents =
-    priorityCounts.critical +
-    priorityCounts.high;
+    }, [events]);
 
   /* ==========================================================
-     SOURCE ATTRIBUTION
-     ========================================================== */
+     BASIC METRICS
+  ========================================================== */
 
-  const sourceCounts =
+  const metrics =
     useMemo(() => {
-      const counts = {
+      const total =
+        normalizedEvents.length;
+
+      const analyzed =
+        normalizedEvents.filter(
+          (event) =>
+            event.mlAvailable,
+        ).length;
+
+      const confidenceTotal =
+        normalizedEvents.reduce(
+          (sum, event) =>
+            sum +
+            event.confidence,
+          0,
+        );
+
+      const averageConfidence =
+        total > 0
+          ? confidenceTotal /
+            total
+          : 0;
+
+      const actionable =
+        normalizedEvents.filter(
+          (event) =>
+            event.priority ===
+              "HIGH" ||
+            event.priority ===
+              "CRITICAL",
+        ).length;
+
+      const critical =
+        normalizedEvents.filter(
+          (event) =>
+            event.priority ===
+            "CRITICAL",
+        ).length;
+
+      const anomalies =
+        normalizedEvents.filter(
+          (event) =>
+            event.anomaly,
+        ).length;
+
+      return {
+        total,
+        analyzed,
+        averageConfidence,
+        actionable,
+        critical,
+        anomalies,
+      };
+    }, [normalizedEvents]);
+
+  /* ==========================================================
+     DYNAMIC SOURCE EVENT COUNTS
+
+     Each event is assigned to the source having the
+     highest actual LightGBM probability.
+  ========================================================== */
+
+  const sourceEventCounts =
+    useMemo(() => {
+      const counts: Record<
+        SourceLabel,
+        number
+      > = {
+        "Forest / Natural": 0,
         Industrial: 0,
-        Agriculture_Biomass: 0,
-        Forest_Natural: 0,
-        Waste_Other: 0,
-        Uncertain: 0,
+        "Agriculture / Biomass": 0,
+        "Waste / Other": 0,
+        Unknown: 0,
       };
 
-      predictions.forEach(
-        ({
-          prediction,
-        }) => {
-          const source =
-            normalizeSource(
-              prediction.predicted_source,
-            );
-
-          if (
-            source ===
-            'Industrial'
-          ) {
-            counts.Industrial += 1;
-          } else if (
-            source ===
-            'Agriculture_Biomass'
-          ) {
-            counts.Agriculture_Biomass +=
-              1;
-          } else if (
-            source ===
-            'Forest_Natural'
-          ) {
-            counts.Forest_Natural +=
-              1;
-          } else if (
-            source ===
-            'Waste_Other'
-          ) {
-            counts.Waste_Other +=
-              1;
-          } else {
-            counts.Uncertain += 1;
-          }
+      normalizedEvents.forEach(
+        (event) => {
+          counts[
+            event.dynamicSource
+          ]++;
         },
       );
 
       return counts;
-    }, [predictions]);
-
-  const sourceTotal =
-    predictions.length;
-
-  const sourcePercentage =
-    (
-      count: number,
-    ) =>
-      sourceTotal > 0
-        ? (
-            count /
-            sourceTotal
-          ) * 100
-        : 0;
+    }, [normalizedEvents]);
 
   /* ==========================================================
-     WEEKLY DETECTION CADENCE
-     ========================================================== */
+     SOURCE DISTRIBUTION
 
-  const weeklyData =
+     IMPORTANT:
+     Percentages are calculated from classified event counts.
+
+     Therefore:
+       Forest %
+       + Industrial %
+       + Agriculture %
+       + Waste %
+       = 100%
+
+     Unknown events are excluded from the denominator.
+  ========================================================== */
+
+  const sourceAttribution =
     useMemo(() => {
-      const now =
-        new Date();
+      const classifiedTotal =
+        normalizedEvents.filter(
+          (event) =>
+            event.dynamicSource !==
+            "Unknown",
+        ).length;
 
-      const buckets =
-        [
-          {
-            label: '7d',
-            start:
-              new Date(
-                now.getTime() -
-                  7 *
-                    24 *
-                    60 *
-                    60 *
-                    1000,
-              ),
-            count: 0,
-          },
-          {
-            label: '14d',
-            start:
-              new Date(
-                now.getTime() -
-                  14 *
-                    24 *
-                    60 *
-                    60 *
-                    1000,
-              ),
-            count: 0,
-          },
-          {
-            label: '21d',
-            start:
-              new Date(
-                now.getTime() -
-                  21 *
-                    24 *
-                    60 *
-                    60 *
-                    1000,
-              ),
-            count: 0,
-          },
-          {
-            label: '28d',
-            start:
-              new Date(
-                now.getTime() -
-                  28 *
-                    24 *
-                    60 *
-                    60 *
-                    1000,
-              ),
-            count: 0,
-          },
-        ];
+      if (
+        classifiedTotal === 0
+      ) {
+        return {
+          "Forest / Natural": 0,
+          Industrial: 0,
+          "Agriculture / Biomass": 0,
+          "Waste / Other": 0,
+        };
+      }
 
-      events.forEach(
-        (event) => {
-          const date =
-            getEventDate(
-              event,
-            );
+      const raw = {
+        "Forest / Natural":
+          (sourceEventCounts[
+            "Forest / Natural"
+          ] /
+            classifiedTotal) *
+          100,
 
-          if (!date) {
-            return;
-          }
+        Industrial:
+          (sourceEventCounts
+            .Industrial /
+            classifiedTotal) *
+          100,
 
-          const age =
-            now.getTime() -
-            date.getTime();
+        "Agriculture / Biomass":
+          (sourceEventCounts[
+            "Agriculture / Biomass"
+          ] /
+            classifiedTotal) *
+          100,
 
-          const days =
-            age /
-            (
-              24 *
-              60 *
-              60 *
-              1000
-            );
+        "Waste / Other":
+          (sourceEventCounts[
+            "Waste / Other"
+          ] /
+            classifiedTotal) *
+          100,
+      };
 
-          if (
-            days >= 0 &&
-            days < 7
-          ) {
-            buckets[0].count += 1;
-          } else if (
-            days >= 7 &&
-            days < 14
-          ) {
-            buckets[1].count += 1;
-          } else if (
-            days >= 14 &&
-            days < 21
-          ) {
-            buckets[2].count += 1;
-          } else if (
-            days >= 21 &&
-            days < 28
-          ) {
-            buckets[3].count += 1;
-          }
-        },
-      );
+      /*
+       * Final normalization prevents any floating-point
+       * rounding drift and guarantees a 100% total.
+       */
+      const totalPercentage =
+        raw["Forest / Natural"] +
+        raw.Industrial +
+        raw["Agriculture / Biomass"] +
+        raw["Waste / Other"];
 
+      if (
+        totalPercentage <= 0
+      ) {
+        return {
+          "Forest / Natural": 0,
+          Industrial: 0,
+          "Agriculture / Biomass": 0,
+          "Waste / Other": 0,
+        };
+      }
+
+      return {
+        "Forest / Natural":
+          (raw["Forest / Natural"] /
+            totalPercentage) *
+          100,
+
+        Industrial:
+          (raw.Industrial /
+            totalPercentage) *
+          100,
+
+        "Agriculture / Biomass":
+          (raw[
+            "Agriculture / Biomass"
+          ] /
+            totalPercentage) *
+          100,
+
+        "Waste / Other":
+          (raw["Waste / Other"] /
+            totalPercentage) *
+          100,
+      };
+    }, [
+      normalizedEvents,
+      sourceEventCounts,
+    ]);
+
+  /* ==========================================================
+     PRIORITY COUNTS
+  ========================================================== */
+
+  const priorityCounts =
+    useMemo(() => {
+      return {
+        CRITICAL:
+          normalizedEvents.filter(
+            (event) =>
+              event.priority ===
+              "CRITICAL",
+          ).length,
+
+        HIGH:
+          normalizedEvents.filter(
+            (event) =>
+              event.priority ===
+              "HIGH",
+          ).length,
+
+        MEDIUM:
+          normalizedEvents.filter(
+            (event) =>
+              event.priority ===
+              "MEDIUM",
+          ).length,
+
+        LOW:
+          normalizedEvents.filter(
+            (event) =>
+              event.priority ===
+              "LOW",
+          ).length,
+      };
+    }, [normalizedEvents]);
+
+  /* ==========================================================
+     RECENT EVENTS
+  ========================================================== */
+
+  const recentEvents =
+    useMemo(() => {
       return [
-        ...buckets,
-      ].reverse();
-    }, [events]);
+        ...normalizedEvents,
+      ]
+        .sort(
+          (a, b) =>
+            (b.date?.getTime() ??
+              0) -
+            (a.date?.getTime() ??
+              0),
+        )
+        .slice(0, 8);
+    }, [normalizedEvents]);
 
-  const maxWeekly =
-    Math.max(
-      1,
-      ...weeklyData.map(
-        (item) =>
-          item.count,
-      ),
+  /* ==========================================================
+     SOURCE FILTER
+  ========================================================== */
+
+  const filteredEvents =
+    useMemo(() => {
+      if (
+        !selectedSource
+      ) {
+        return normalizedEvents;
+      }
+
+      return normalizedEvents.filter(
+        (event) =>
+          event.dynamicSource ===
+          selectedSource,
+      );
+    }, [
+      normalizedEvents,
+      selectedSource,
+    ]);
+
+  /* ==========================================================
+     MODEL STATUS
+  ========================================================== */
+
+  const modelAvailable =
+    normalizedEvents.some(
+      (event) =>
+        event.mlAvailable,
     );
 
   /* ==========================================================
-     ANOMALY EVENTS
-     ========================================================== */
+     SOURCE DISPLAY ORDER
+  ========================================================== */
 
-  const anomalyCount =
-    events.filter(
-      (event) =>
-        Boolean(
-          (
-            event as ThermalEvent & {
-              isAnomaly?: boolean;
-              anomalyScore?: number;
-            }
-          ).isAnomaly,
-        ),
-    ).length;
+  const sourceDisplay: SourceLabel[] =
+    [
+      "Forest / Natural",
+      "Industrial",
+      "Agriculture / Biomass",
+      "Waste / Other",
+    ];
 
   /* ==========================================================
      RENDER
-     ========================================================== */
+  ========================================================== */
 
   return (
-    <div className="
-      min-h-full
-      space-y-6
-      select-text
-      pb-8
-    ">
+    <div className="min-h-full w-full bg-[#030712] text-white p-4 sm:p-5 lg:p-6">
 
-      {/* ======================================================
-          HERO
-          ====================================================== */}
+      {/* HEADER */}
 
-      <div className="
-        rounded-3xl
-        border
-        border-[#24346f]
-        bg-[#080d25]/95
-        px-6
-        py-7
-        shadow-2xl
-      ">
+      <div className="mb-6">
 
-        <div className="
-          flex
-          items-start
-          justify-between
-          gap-5
-          flex-wrap
-        ">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
 
           <div>
 
-            <div className="
-              flex
-              items-center
-              gap-3
-              mb-2
-            ">
+            <div className="mb-1 flex items-center gap-2">
 
-              <div className="
-                w-10
-                h-10
-                rounded-xl
-                bg-cyan-500/10
-                border
-                border-cyan-500/40
-                flex
-                items-center
-                justify-center
-              ">
-                <Activity className="
-                  w-5
-                  h-5
-                  text-cyan-400
-                " />
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-cyan-500/30 bg-cyan-500/10">
+
+                <BrainCircuit className="h-4 w-4 text-cyan-400" />
+
               </div>
 
-              <h1 className="
-                text-2xl
-                sm:text-3xl
-                font-black
-                font-heading
-                text-white
-                tracking-wide
-              ">
-                MACRO ANALYTICS &
-                ATTRIBUTION METRICS
-              </h1>
+              <span className="text-[11px] font-bold uppercase tracking-[0.22em] text-cyan-400">
+                VEYRONIX AI
+              </span>
 
             </div>
 
-            <p className="
-              text-sm
-              text-slate-400
-              max-w-3xl
-            ">
-              VEYRONIX LightGBM source
-              attribution, investigation
-              priority and thermal-event
-              statistics from the
-              currently loaded event set.
+            <h1 className="text-2xl font-black tracking-tight text-white sm:text-3xl">
+              SYSTEM ANALYTICS
+            </h1>
+
+            <p className="mt-1 text-xs text-slate-400 sm:text-sm">
+              LightGBM intelligence, source distribution,
+              investigation priority and anomaly monitoring.
             </p>
 
           </div>
 
-          <div className="
-            flex
-            items-center
-            gap-2
-            px-3
-            py-2
-            rounded-xl
-            border
-            border-cyan-500/30
-            bg-cyan-500/10
-          ">
+          <div className="flex items-center gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-3 py-2">
 
-            <Database className="
-              w-4
-              h-4
-              text-cyan-400
-            " />
+            <span className="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.8)]" />
 
-            <span className="
-              text-xs
-              font-mono
-              text-cyan-300
-            ">
-              DATASET WINDOW:
-              {totalEvents}
+            <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-300">
+              {modelAvailable
+                ? "ML ENGINE ONLINE"
+                : "ML OUTPUT PENDING"}
             </span>
 
           </div>
@@ -707,898 +973,665 @@ export const AnalyticsPage: React.FC<
 
       </div>
 
-      {/* ======================================================
-          TOP METRICS
-          ====================================================== */}
+      {/* KPI CARDS */}
 
-      <div className="
-        grid
-        grid-cols-1
-        sm:grid-cols-2
-        xl:grid-cols-4
-        gap-5
-      ">
-
-        {/* TOTAL */}
+      <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
 
         <MetricCard
-          title="LOADED EVENTS"
-          value={String(
-            totalEvents,
+          icon={
+            <Flame className="h-5 w-5" />
+          }
+          label="THERMAL EVENTS"
+          value={metrics.total.toLocaleString()}
+          detail="Events loaded from telemetry"
+          tone="orange"
+        />
+
+        <MetricCard
+          icon={
+            <BrainCircuit className="h-5 w-5" />
+          }
+          label="ML COVERAGE"
+          value={
+            metrics.total > 0
+              ? `${Math.round(
+                  (metrics.analyzed /
+                    metrics.total) *
+                    100,
+                )}%`
+              : "0%"
+          }
+          detail={`${metrics.analyzed} events with model output`}
+          tone="cyan"
+        />
+
+        <MetricCard
+          icon={
+            <Gauge className="h-5 w-5" />
+          }
+          label="AVG. CONFIDENCE"
+          value={formatConfidence(
+            metrics.averageConfidence,
           )}
-          description="
-            Current VEYRONIX dashboard
-            event window
-          "
-          icon={
-            <Flame className="
-              w-5
-              h-5
-              text-cyan-400
-            " />
-          }
-          valueClass="text-cyan-300"
+          detail="LightGBM attribution confidence"
+          tone="violet"
         />
 
-        {/* ACTIONABLE */}
-
         <MetricCard
-          title="ACTIONABLE PRIORITY"
-          value={String(
-            actionableEvents,
-          )}
-          description="
-            Critical + High confidence
-            ML predictions
-          "
           icon={
-            <ShieldAlert className="
-              w-5
-              h-5
-              text-orange-400
-            " />
+            <ShieldAlert className="h-5 w-5" />
           }
-          valueClass="text-orange-400"
-        />
-
-        {/* CONFIDENCE */}
-
-        <MetricCard
-          title="AVG ML CONFIDENCE"
-          value={`${(
-            averageConfidence *
-            100
-          ).toFixed(1)}%`}
-          description="
-            Mean LightGBM prediction
-            confidence
-          "
-          icon={
-            <BrainCircuit className="
-              w-5
-              h-5
-              text-emerald-400
-            " />
-          }
-          valueClass="text-emerald-400"
-        />
-
-        {/* COVERAGE */}
-
-        <MetricCard
-          title="MODEL COVERAGE"
-          value={`${modelCoverage.toFixed(
-            0,
-          )}%`}
-          description={
-            predictionErrors > 0
-              ? `${predictions.length} predictions • ${predictionErrors} failed`
-              : `${predictions.length} / ${totalEvents} events analyzed`
-          }
-          icon={
-            <Target className="
-              w-5
-              h-5
-              text-purple-400
-            " />
-          }
-          valueClass="text-purple-400"
+          label="ACTIONABLE EVENTS"
+          value={metrics.actionable.toLocaleString()}
+          detail={`${metrics.critical} critical events`}
+          tone="red"
         />
 
       </div>
 
-      {/* ======================================================
-          MAIN ANALYTICS
-          ====================================================== */}
+      {/* MAIN ROW */}
 
-      <div className="
-        grid
-        grid-cols-1
-        xl:grid-cols-12
-        gap-5
-      ">
+      <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
 
-        {/* WEEKLY */}
+        {/* SOURCE DISTRIBUTION */}
 
-        <div className="
-          xl:col-span-7
-          rounded-2xl
-          border
-          border-[#1e2a60]
-          bg-[#080d24]
-          p-5
-        ">
+        <section className="overflow-hidden rounded-2xl border border-slate-800 bg-[#07101d] xl:col-span-2">
 
-          <div className="
-            flex
-            items-center
-            justify-between
-            pb-3
-            border-b
-            border-[#1b2554]
-          ">
+          <div className="border-b border-slate-800 px-5 py-4">
 
-            <div>
+            <div className="flex items-center gap-2">
 
-              <h2 className="
-                text-sm
-                font-bold
-                font-heading
-                text-white
-              ">
-                EVENT DETECTION CADENCE
+              <Layers className="h-4 w-4 text-cyan-400" />
+
+              <h2 className="text-sm font-black uppercase tracking-wider text-white">
+                THERMAL SOURCE DISTRIBUTION
               </h2>
-
-              <p className="
-                text-[11px]
-                text-slate-500
-                mt-1
-              ">
-                Actual dates from the
-                loaded VEYRONIX events
-              </p>
 
             </div>
 
-            <span className="
-              text-xs
-              text-cyan-400
-              font-mono
-            ">
-              7-DAY WINDOWS
-            </span>
+            <p className="mt-1 text-xs text-slate-500">
+              Predicted source distribution across loaded thermal events.
+            </p>
 
           </div>
 
-          <div className="
-            h-64
-            flex
-            items-end
-            justify-between
-            gap-4
-            pt-8
-          ">
+          <div className="p-5 space-y-4">
 
-            {weeklyData.map(
-              (
-                item,
-              ) => {
+            {sourceDisplay.map(
+              (source) => {
 
-                const height =
-                  Math.max(
-                    8,
-                    (
-                      item.count /
-                      maxWeekly
-                    ) *
-                      190,
-                  );
+                const percentage =
+                  sourceAttribution[
+                    source as keyof typeof sourceAttribution
+                  ] ?? 0;
+
+                const eventCount =
+                  sourceEventCounts[
+                    source
+                  ] ?? 0;
+
+                const active =
+                  selectedSource ===
+                  source;
 
                 return (
-                  <div
-                    key={
-                      item.label
+                  <button
+                    key={source}
+                    type="button"
+                    onClick={() =>
+                      setSelectedSource(
+                        active
+                          ? null
+                          : source,
+                      )
                     }
-                    className="
-                      flex-1
-                      h-full
-                      flex
-                      flex-col
-                      justify-end
-                      items-center
-                      gap-2
-                    "
+                    className={`w-full rounded-xl border p-4 text-left transition ${
+                      active
+                        ? "border-cyan-500/50 bg-cyan-500/10"
+                        : "border-slate-800 bg-slate-950/30 hover:border-slate-700"
+                    }`}
                   >
 
-                    <span className="
-                      text-xs
-                      font-mono
-                      text-cyan-300
-                      font-bold
-                    ">
-                      {item.count}
-                    </span>
+                    <div className="mb-2 flex items-center justify-between gap-4">
 
-                    <div
-                      className="
-                        w-full
-                        max-w-[75px]
-                        rounded-t-xl
-                        bg-gradient-to-t
-                        from-cyan-600
-                        to-cyan-400
-                        shadow-[0_0_20px_rgba(6,182,212,0.25)]
-                      "
-                      style={{
-                        height: `${height}px`,
-                      }}
-                    />
+                      <div className="flex items-center gap-2">
 
-                    <span className="
-                      text-[10px]
-                      font-mono
-                      text-slate-500
-                    ">
-                      {item.label}
-                    </span>
+                        <span
+                          className={`h-2.5 w-2.5 rounded-full ${
+                            source ===
+                            "Forest / Natural"
+                              ? "bg-emerald-400"
+                              : source ===
+                                  "Industrial"
+                                ? "bg-orange-400"
+                                : source ===
+                                    "Agriculture / Biomass"
+                                  ? "bg-yellow-400"
+                                  : "bg-red-400"
+                          }`}
+                        />
 
-                  </div>
+                        <span className="text-xs font-bold text-slate-200">
+                          {source}
+                        </span>
+
+                      </div>
+
+                      <div className="text-right">
+
+                        <span className="text-sm font-black text-white">
+                          {percentage.toFixed(
+                            1,
+                          )}
+                          %
+                        </span>
+
+                        <span className="ml-2 text-[10px] text-slate-500">
+                          {eventCount} predicted
+                        </span>
+
+                      </div>
+
+                    </div>
+
+                    <div className="h-2 overflow-hidden rounded-full bg-slate-900">
+
+                      <div
+                        className="h-full rounded-full bg-cyan-500 transition-all duration-500"
+                        style={{
+                          width: `${Math.min(
+                            100,
+                            Math.max(
+                              0,
+                              percentage,
+                            ),
+                          )}%`,
+                        }}
+                      />
+
+                    </div>
+
+                  </button>
                 );
               },
             )}
 
           </div>
 
-          <div className="
-            mt-4
-            pt-3
-            border-t
-            border-[#1b2554]
-            text-[10px]
-            text-slate-500
-          ">
-            Note: this chart uses only
-            event dates available in the
-            current {totalEvents}-event
-            dashboard window.
-          </div>
-
-        </div>
-
-        {/* SOURCE ATTRIBUTION */}
-
-        <div className="
-          xl:col-span-5
-          rounded-2xl
-          border
-          border-[#1e2a60]
-          bg-[#080d24]
-          p-5
-        ">
-
-          <div className="
-            flex
-            items-center
-            justify-between
-            pb-3
-            border-b
-            border-[#1b2554]
-          ">
-
-            <div>
-
-              <h2 className="
-                text-sm
-                font-bold
-                font-heading
-                text-white
-              ">
-                LIGHTGBM SOURCE
-                ATTRIBUTION
-              </h2>
-
-              <p className="
-                text-[11px]
-                text-slate-500
-                mt-1
-              ">
-                Predictions from the
-                production VEYRONIX model
-              </p>
-
-            </div>
-
-            <BrainCircuit className="
-              w-4
-              h-4
-              text-cyan-400
-            " />
-
-          </div>
-
-          <div className="
-            space-y-5
-            pt-5
-          ">
-
-            <SourceBar
-              label="Industrial Activity"
-              value={
-                sourcePercentage(
-                  sourceCounts.Industrial,
-                )
-              }
-              count={
-                sourceCounts.Industrial
-              }
-              suffix="Industrial"
-            />
-
-            <SourceBar
-              label="Agriculture / Biomass"
-              value={
-                sourcePercentage(
-                  sourceCounts
-                    .Agriculture_Biomass,
-                )
-              }
-              count={
-                sourceCounts
-                  .Agriculture_Biomass
-              }
-              suffix="Agriculture"
-            />
-
-            <SourceBar
-              label="Forest / Natural"
-              value={
-                sourcePercentage(
-                  sourceCounts
-                    .Forest_Natural,
-                )
-              }
-              count={
-                sourceCounts
-                  .Forest_Natural
-              }
-              suffix="Forest"
-            />
-
-            <SourceBar
-              label="Waste / Other"
-              value={
-                sourcePercentage(
-                  sourceCounts
-                    .Waste_Other,
-                )
-              }
-              count={
-                sourceCounts
-                  .Waste_Other
-              }
-              suffix="Waste"
-            />
-
-            <SourceBar
-              label="Uncertain / Review"
-              value={
-                sourcePercentage(
-                  sourceCounts
-                    .Uncertain,
-                )
-              }
-              count={
-                sourceCounts
-                  .Uncertain
-              }
-              suffix="Uncertain"
-            />
-
-          </div>
-
-          <div className="
-            mt-5
-            pt-3
-            border-t
-            border-[#1b2554]
-            text-[10px]
-            text-slate-500
-          ">
-            Denominator:
-            {sourceTotal}
-            successful LightGBM
-            predictions.
-          </div>
-
-        </div>
-
-      </div>
-
-      {/* ======================================================
-          PRIORITY + MODEL STATUS
-          ====================================================== */}
-
-      <div className="
-        grid
-        grid-cols-1
-        lg:grid-cols-2
-        gap-5
-      ">
+        </section>
 
         {/* PRIORITY */}
 
-        <div className="
-          rounded-2xl
-          border
-          border-[#1e2a60]
-          bg-[#080d24]
-          p-5
-        ">
+        <section className="overflow-hidden rounded-2xl border border-slate-800 bg-[#07101d]">
 
-          <div className="
-            flex
-            items-center
-            justify-between
-            pb-3
-            border-b
-            border-[#1b2554]
-          ">
+          <div className="border-b border-slate-800 px-5 py-4">
 
-            <h2 className="
-              text-sm
-              font-bold
-              font-heading
-              text-white
-            ">
-              PRIORITY SEVERITY SPREAD
-            </h2>
+            <div className="flex items-center gap-2">
 
-            <Gauge className="
-              w-4
-              h-4
-              text-orange-400
-            " />
+              <Target className="h-4 w-4 text-red-400" />
 
-          </div>
+              <h2 className="text-sm font-black uppercase tracking-wider text-white">
+                INVESTIGATION PRIORITY
+              </h2>
 
-          <div className="
-            grid
-            grid-cols-2
-            gap-3
-            mt-5
-          ">
+            </div>
 
-            <PriorityCard
-              label="Critical"
-              value={
-                priorityCounts.critical
-              }
-              color="red"
-            />
-
-            <PriorityCard
-              label="High"
-              value={
-                priorityCounts.high
-              }
-              color="orange"
-            />
-
-            <PriorityCard
-              label="Medium"
-              value={
-                priorityCounts.medium
-              }
-              color="amber"
-            />
-
-            <PriorityCard
-              label="Low / Review"
-              value={
-                priorityCounts.low
-              }
-              color="emerald"
-            />
-
-          </div>
-
-          <div className="
-            mt-4
-            text-[10px]
-            text-slate-500
-            leading-relaxed
-          ">
-            Priority is derived from
-            the production LightGBM
-            confidence thresholds used
-            by VEYRONIX:
-            ≥85% Critical,
-            ≥70% High,
-            ≥50% Medium,
-            otherwise Low/Review.
-          </div>
-
-        </div>
-
-        {/* MODEL STATUS */}
-
-        <div className="
-          rounded-2xl
-          border
-          border-[#1e2a60]
-          bg-[#080d24]
-          p-5
-        ">
-
-          <div className="
-            flex
-            items-center
-            justify-between
-            pb-3
-            border-b
-            border-[#1b2554]
-          ">
-
-            <h2 className="
-              text-sm
-              font-bold
-              font-heading
-              text-white
-            ">
-              VEYRONIX MODEL STATUS
-            </h2>
-
-            <CheckCircle2 className="
-              w-4
-              h-4
-              text-emerald-400
-            " />
-
-          </div>
-
-          <div className="
-            space-y-4
-            mt-5
-          ">
-
-            <StatusRow
-              label="Model"
-              value="LightGBM"
-              active
-            />
-
-            <StatusRow
-              label="Task"
-              value="Thermal Source Classification"
-              active
-            />
-
-            <StatusRow
-              label="Classes"
-              value="4"
-              active
-            />
-
-            <StatusRow
-              label="Anomaly Detector"
-              value="Isolation Forest"
-              active
-            />
-
-            <StatusRow
-              label="Events Loaded"
-              value={String(
-                totalEvents,
-              )}
-              active
-            />
-
-            <StatusRow
-              label="ML Predictions"
-              value={String(
-                predictions.length,
-              )}
-              active={
-                predictions.length >
-                0
-              }
-            />
-
-            <StatusRow
-              label="Prediction Errors"
-              value={String(
-                predictionErrors,
-              )}
-              active={
-                predictionErrors ===
-                0
-              }
-            />
-
-          </div>
-
-        </div>
-
-      </div>
-
-      {/* ======================================================
-          ANOMALY / DATASET NOTE
-          ====================================================== */}
-
-      <div className="
-        rounded-2xl
-        border
-        border-[#1e2a60]
-        bg-[#080d24]
-        p-5
-      ">
-
-        <div className="
-          flex
-          items-center
-          gap-3
-        ">
-
-          <Layers className="
-            w-5
-            h-5
-            text-purple-400
-          " />
-
-          <div>
-
-            <h2 className="
-              text-sm
-              font-bold
-              font-heading
-              text-white
-            ">
-              ANOMALY & DATA COVERAGE
-            </h2>
-
-            <p className="
-              text-[11px]
-              text-slate-500
-              mt-1
-            ">
-              Current dashboard window
+            <p className="mt-1 text-xs text-slate-500">
+              Backend-generated event escalation levels.
             </p>
 
           </div>
 
-        </div>
+          <div className="grid grid-cols-2 gap-3 p-5">
 
-        <div className="
-          grid
-          grid-cols-1
-          sm:grid-cols-3
-          gap-4
-          mt-5
-        ">
+            <PriorityCard
+              label="CRITICAL"
+              count={
+                priorityCounts.CRITICAL
+              }
+              tone="critical"
+            />
 
-          <div className="
-            rounded-xl
-            bg-[#070b1e]
-            border
-            border-[#1b2554]
-            p-4
-          ">
+            <PriorityCard
+              label="HIGH"
+              count={
+                priorityCounts.HIGH
+              }
+              tone="high"
+            />
 
-            <div className="
-              text-[10px]
-              uppercase
-              text-slate-500
-              font-bold
-            ">
-              Loaded Events
-            </div>
+            <PriorityCard
+              label="MEDIUM"
+              count={
+                priorityCounts.MEDIUM
+              }
+              tone="medium"
+            />
 
-            <div className="
-              text-2xl
-              font-mono
-              font-bold
-              text-cyan-300
-              mt-1
-            ">
-              {totalEvents}
-            </div>
+            <PriorityCard
+              label="LOW"
+              count={
+                priorityCounts.LOW
+              }
+              tone="low"
+            />
 
           </div>
 
-          <div className="
-            rounded-xl
-            bg-[#070b1e]
-            border
-            border-[#1b2554]
-            p-4
-          ">
-
-            <div className="
-              text-[10px]
-              uppercase
-              text-slate-500
-              font-bold
-            ">
-              Flagged Anomalies
-            </div>
-
-            <div className="
-              text-2xl
-              font-mono
-              font-bold
-              text-purple-400
-              mt-1
-            ">
-              {anomalyCount}
-            </div>
-
-          </div>
-
-          <div className="
-            rounded-xl
-            bg-[#070b1e]
-            border
-            border-[#1b2554]
-            p-4
-          ">
-
-            <div className="
-              text-[10px]
-              uppercase
-              text-slate-500
-              font-bold
-            ">
-              ML Coverage
-            </div>
-
-            <div className="
-              text-2xl
-              font-mono
-              font-bold
-              text-emerald-400
-              mt-1
-            ">
-              {modelCoverage.toFixed(
-                0,
-              )}%
-            </div>
-
-          </div>
-
-        </div>
-
-        <div className="
-          mt-4
-          text-[10px]
-          text-slate-500
-          leading-relaxed
-        ">
-          This analytics screen describes
-          the current 100-event frontend
-          window. It does not represent
-          the complete 439,251-event
-          training/processed corpus.
-        </div>
+        </section>
 
       </div>
 
-      {/* ======================================================
-          LOADING OVERLAY
-          ====================================================== */}
+      {/* SECOND ROW */}
 
-      {isLoadingML && (
-        <div className="
-          fixed
-          bottom-5
-          right-5
-          z-50
-          flex
-          items-center
-          gap-2
-          px-4
-          py-3
-          rounded-xl
-          bg-[#080d24]/95
-          border
-          border-cyan-500/50
-          shadow-2xl
-        ">
+      <div className="mt-5 grid grid-cols-1 gap-5 xl:grid-cols-3">
 
-          <Loader2 className="
-            w-4
-            h-4
-            animate-spin
-            text-cyan-400
-          " />
+        {/* ANOMALY */}
 
-          <span className="
-            text-xs
-            text-cyan-300
-            font-mono
-          ">
-            Running LightGBM on{' '}
-            {events.length}{' '}
-            events...
+        <section className="overflow-hidden rounded-2xl border border-slate-800 bg-[#07101d]">
+
+          <div className="border-b border-slate-800 px-5 py-4">
+
+            <div className="flex items-center gap-2">
+
+              <AlertTriangle className="h-4 w-4 text-amber-400" />
+
+              <h2 className="text-sm font-black uppercase tracking-wider text-white">
+                ANOMALY INTELLIGENCE
+              </h2>
+
+            </div>
+
+            <p className="mt-1 text-xs text-slate-500">
+              Backend anomaly flags from thermal behaviour.
+            </p>
+
+          </div>
+
+          <div className="p-5">
+
+            <div className="flex items-center justify-between rounded-xl border border-amber-500/20 bg-amber-500/5 p-4">
+
+              <div>
+
+                <div className="text-[10px] font-bold uppercase tracking-wider text-amber-400">
+                  FLAGGED EVENTS
+                </div>
+
+                <div className="mt-1 text-3xl font-black text-white">
+                  {metrics.anomalies}
+                </div>
+
+              </div>
+
+              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-amber-500/10">
+
+                <AlertTriangle className="h-6 w-6 text-amber-400" />
+
+              </div>
+
+            </div>
+
+            <div className="mt-4">
+
+              <div className="mb-2 flex justify-between text-[10px] uppercase tracking-wider">
+
+                <span className="text-slate-500">
+                  Anomaly ratio
+                </span>
+
+                <span className="font-bold text-amber-300">
+
+                  {metrics.total > 0
+                    ? (
+                        (metrics.anomalies /
+                          metrics.total) *
+                        100
+                      ).toFixed(
+                        1,
+                      )
+                    : "0.0"}
+                  %
+
+                </span>
+
+              </div>
+
+              <div className="h-2 overflow-hidden rounded-full bg-slate-900">
+
+                <div
+                  className="h-full rounded-full bg-amber-400"
+                  style={{
+                    width: `${
+                      metrics.total >
+                      0
+                        ? Math.min(
+                            100,
+                            (metrics.anomalies /
+                              metrics.total) *
+                              100,
+                          )
+                        : 0
+                    }%`,
+                  }}
+                />
+
+              </div>
+
+            </div>
+
+          </div>
+
+        </section>
+
+        {/* HEALTH */}
+
+        <section className="overflow-hidden rounded-2xl border border-slate-800 bg-[#07101d]">
+
+          <div className="border-b border-slate-800 px-5 py-4">
+
+            <div className="flex items-center gap-2">
+
+              <Database className="h-4 w-4 text-cyan-400" />
+
+              <h2 className="text-sm font-black uppercase tracking-wider text-white">
+                MODEL & DATA HEALTH
+              </h2>
+
+            </div>
+
+            <p className="mt-1 text-xs text-slate-500">
+              Current telemetry and model state.
+            </p>
+
+          </div>
+
+          <div className="space-y-3 p-5">
+
+            <HealthItem
+              icon={
+                <BrainCircuit className="h-4 w-4" />
+              }
+              label="LightGBM classifier"
+              value={
+                modelAvailable
+                  ? "AVAILABLE"
+                  : "UNAVAILABLE"
+              }
+              ok={modelAvailable}
+            />
+
+            <HealthItem
+              icon={
+                <Activity className="h-4 w-4" />
+              }
+              label="Telemetry events"
+              value={
+                metrics.total >
+                0
+                  ? "CONNECTED"
+                  : "NO DATA"
+              }
+              ok={
+                metrics.total >
+                0
+              }
+            />
+
+            <HealthItem
+              icon={
+                <CheckCircle2 className="h-4 w-4" />
+              }
+              label="ML analysis"
+              value={
+                metrics.analyzed ===
+                metrics.total
+                  ? "COMPLETE"
+                  : `${metrics.analyzed}/${metrics.total}`
+              }
+              ok={
+                metrics.total >
+                  0 &&
+                metrics.analyzed ===
+                  metrics.total
+              }
+            />
+
+            <HealthItem
+              icon={
+                <TrendingUp className="h-4 w-4" />
+              }
+              label="Average confidence"
+              value={formatConfidence(
+                metrics.averageConfidence,
+              )}
+              ok={
+                metrics.averageConfidence >=
+                0.7
+              }
+            />
+
+          </div>
+
+        </section>
+
+        {/* DATA SCOPE */}
+
+        <section className="overflow-hidden rounded-2xl border border-slate-800 bg-[#07101d]">
+
+          <div className="border-b border-slate-800 px-5 py-4">
+
+            <div className="flex items-center gap-2">
+
+              <Layers className="h-4 w-4 text-violet-400" />
+
+              <h2 className="text-sm font-black uppercase tracking-wider text-white">
+                DATA SCOPE
+              </h2>
+
+            </div>
+
+            <p className="mt-1 text-xs text-slate-500">
+              Current analytics dataset.
+            </p>
+
+          </div>
+
+          <div className="p-5">
+
+            <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-5">
+
+              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                EVENTS IN SCOPE
+              </div>
+
+              <div className="mt-2 text-4xl font-black text-white">
+                {filteredEvents.length.toLocaleString()}
+              </div>
+
+              <div className="mt-2 text-xs text-slate-500">
+
+                {selectedSource
+                  ? `Filtered by ${selectedSource}`
+                  : "All loaded thermal events"}
+
+              </div>
+
+              {selectedSource && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setSelectedSource(
+                      null,
+                    )
+                  }
+                  className="mt-4 rounded-lg border border-violet-500/30 bg-violet-500/10 px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-violet-300 hover:bg-violet-500/20"
+                >
+                  Show all events
+                </button>
+              )}
+
+            </div>
+
+          </div>
+
+        </section>
+
+      </div>
+
+      {/* RECENT EVENTS */}
+
+      <section className="mt-5 overflow-hidden rounded-2xl border border-slate-800 bg-[#07101d]">
+
+        <div className="border-b border-slate-800 px-5 py-4">
+
+          <div className="flex items-center gap-2">
+
+            <Activity className="h-4 w-4 text-cyan-400" />
+
+            <h2 className="text-sm font-black uppercase tracking-wider text-white">
+              RECENT EVENT ACTIVITY
+            </h2>
+
+          </div>
+
+          <p className="mt-1 text-xs text-slate-500">
+            Latest thermal events received by the analytics layer.
+          </p>
+
+        </div>
+
+        <div className="divide-y divide-slate-800">
+
+          {recentEvents.length ===
+          0 ? (
+
+            <div className="p-8 text-center">
+
+              <Database className="mx-auto h-8 w-8 text-slate-700" />
+
+              <p className="mt-3 text-xs text-slate-500">
+                No thermal events available.
+              </p>
+
+            </div>
+
+          ) : (
+            recentEvents.map(
+              (event) => (
+                <div
+                  key={
+                    event.eventId
+                  }
+                  className="grid grid-cols-1 gap-3 px-5 py-4 sm:grid-cols-[1fr_auto_auto_auto] sm:items-center"
+                >
+
+                  <div className="min-w-0">
+
+                    <div className="flex items-center gap-2">
+
+                      <span className="h-2 w-2 shrink-0 rounded-full bg-cyan-400" />
+
+                      <span className="truncate text-xs font-bold text-slate-200">
+                        {event.name ??
+                          event.eventId}
+                      </span>
+
+                    </div>
+
+                    <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-slate-500">
+
+                      <span>
+                        {formatDate(
+                          event.date,
+                        )}
+                      </span>
+
+                      <span>
+                        {event.dynamicSource ===
+                        "Unknown"
+                          ? "Awaiting ML"
+                          : event.dynamicSource}
+                      </span>
+
+                    </div>
+
+                  </div>
+
+                  <div
+                    className={`inline-flex w-fit rounded-lg border px-2.5 py-1 text-[9px] font-black uppercase tracking-wider ${
+                      event.priority ===
+                      "CRITICAL"
+                        ? "border-red-500/30 bg-red-500/10 text-red-300"
+                        : event.priority ===
+                            "HIGH"
+                          ? "border-orange-500/30 bg-orange-500/10 text-orange-300"
+                          : event.priority ===
+                              "MEDIUM"
+                            ? "border-amber-500/30 bg-amber-500/10 text-amber-300"
+                            : "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+                    }`}
+                  >
+                    {event.priority}
+                  </div>
+
+                  <div className="text-left sm:text-right">
+
+                    <div className="text-[9px] uppercase tracking-wider text-slate-600">
+                      Confidence
+                    </div>
+
+                    <div className="text-xs font-black text-cyan-300">
+                      {formatConfidence(
+                        event.confidence,
+                      )}
+                    </div>
+
+                  </div>
+
+                  <div className="text-left sm:text-right">
+
+                    <div className="text-[9px] uppercase tracking-wider text-slate-600">
+                      Score
+                    </div>
+
+                    <div className="text-xs font-black text-white">
+                      {event.priorityScore}
+
+                      <span className="ml-0.5 text-slate-600">
+                        /100
+                      </span>
+
+                    </div>
+
+                  </div>
+
+                </div>
+              ),
+            )
+          )}
+
+        </div>
+
+      </section>
+
+      {/* FOOTER */}
+
+      <div className="mt-5 flex flex-col gap-2 border-t border-slate-800 pt-4 sm:flex-row sm:items-center sm:justify-between">
+
+        <div className="flex items-center gap-2">
+
+          <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+
+          <span className="text-[9px] font-bold uppercase tracking-[0.16em] text-slate-500">
+            ANALYTICS PIPELINE ACTIVE
           </span>
 
         </div>
-      )}
 
-    </div>
-  );
-};
-
-/* ============================================================
-   METRIC CARD
-   ============================================================ */
-
-function MetricCard({
-  title,
-  value,
-  description,
-  icon,
-  valueClass,
-}: {
-  title: string;
-  value: string;
-  description: string;
-  icon: React.ReactNode;
-  valueClass: string;
-}) {
-  return (
-    <div className="
-      rounded-2xl
-      border
-      border-[#1e2a60]
-      bg-[#080d24]
-      p-5
-      min-h-[165px]
-      flex
-      flex-col
-      justify-between
-    ">
-
-      <div className="
-        flex
-        items-center
-        justify-between
-      ">
-
-        <span className="
-          text-[10px]
-          uppercase
-          font-bold
-          font-heading
-          text-slate-400
-        ">
-          {title}
-        </span>
-
-        {icon}
-
-      </div>
-
-      <div>
-
-        <div className={`
-          text-4xl
-          sm:text-5xl
-          font-black
-          font-mono
-          mt-4
-          ${valueClass}
-        `}>
-          {value}
+        <div className="text-[9px] uppercase tracking-[0.14em] text-slate-600">
+          VEYRONIX AI • LIGHTGBM INTELLIGENCE
         </div>
-
-        <p className="
-          text-[11px]
-          text-slate-500
-          mt-2
-          whitespace-pre-line
-        ">
-          {description}
-        </p>
 
       </div>
 
@@ -1607,87 +1640,67 @@ function MetricCard({
 }
 
 /* ============================================================
-   SOURCE BAR
-   ============================================================ */
+   METRIC CARD
+============================================================ */
 
-function SourceBar({
+function MetricCard({
+  icon,
   label,
   value,
-  count,
-  suffix,
+  detail,
+  tone,
 }: {
+  icon: React.ReactNode;
   label: string;
-  value: number;
-  count: number;
-  suffix: string;
+  value: string;
+  detail: string;
+  tone:
+    | "orange"
+    | "cyan"
+    | "violet"
+    | "red";
 }) {
-  const safeValue =
-    clamp(
-      value / 100,
-    ) * 100;
+  const toneClasses = {
+    orange:
+      "border-orange-500/20 bg-orange-500/5 text-orange-400",
+
+    cyan:
+      "border-cyan-500/20 bg-cyan-500/5 text-cyan-400",
+
+    violet:
+      "border-violet-500/20 bg-violet-500/5 text-violet-400",
+
+    red:
+      "border-red-500/20 bg-red-500/5 text-red-400",
+  };
 
   return (
-    <div>
+    <div className="rounded-2xl border border-slate-800 bg-[#07101d] p-4">
 
-      <div className="
-        flex
-        items-center
-        justify-between
-        mb-1.5
-      ">
+      <div className="flex items-start justify-between">
 
-        <span className="
-          text-xs
-          text-slate-300
-          font-mono
-        ">
-          {label}
-        </span>
+        <div>
 
-        <span className="
-          text-xs
-          text-white
-          font-mono
-          font-bold
-        ">
-          {value.toFixed(1)}%
-        </span>
+          <div className="text-[9px] font-black uppercase tracking-[0.16em] text-slate-500">
+            {label}
+          </div>
 
-      </div>
+          <div className="mt-2 text-2xl font-black tracking-tight text-white">
+            {value}
+          </div>
 
-      <div className="
-        h-2.5
-        w-full
-        rounded-full
-        bg-[#050816]
-        border
-        border-[#1b2554]
-        overflow-hidden
-      ">
+          <div className="mt-1 text-[10px] text-slate-600">
+            {detail}
+          </div>
+
+        </div>
 
         <div
-          className="
-            h-full
-            rounded-full
-            bg-cyan-400
-            transition-all
-          "
-          style={{
-            width: `${safeValue}%`,
-          }}
-        />
+          className={`flex h-9 w-9 items-center justify-center rounded-xl border ${toneClasses[tone]}`}
+        >
+          {icon}
+        </div>
 
-      </div>
-
-      <div className="
-        mt-1
-        text-[9px]
-        text-slate-600
-        font-mono
-      ">
-        {count} predicted as
-        {' '}
-        {suffix}
       </div>
 
     </div>
@@ -1696,77 +1709,46 @@ function SourceBar({
 
 /* ============================================================
    PRIORITY CARD
-   ============================================================ */
+============================================================ */
 
 function PriorityCard({
   label,
-  value,
-  color,
+  count,
+  tone,
 }: {
   label: string;
-  value: number;
-  color:
-    | 'red'
-    | 'orange'
-    | 'amber'
-    | 'emerald';
+  count: number;
+  tone:
+    | "critical"
+    | "high"
+    | "medium"
+    | "low";
 }) {
   const classes = {
-    red: {
-      value:
-        'text-red-400',
-      border:
-        'border-red-500/30',
-    },
+    critical:
+      "border-red-500/20 bg-red-500/5 text-red-300",
 
-    orange: {
-      value:
-        'text-orange-400',
-      border:
-        'border-orange-500/30',
-    },
+    high:
+      "border-orange-500/20 bg-orange-500/5 text-orange-300",
 
-    amber: {
-      value:
-        'text-amber-400',
-      border:
-        'border-amber-500/30',
-    },
+    medium:
+      "border-amber-500/20 bg-amber-500/5 text-amber-300",
 
-    emerald: {
-      value:
-        'text-emerald-400',
-      border:
-        'border-emerald-500/30',
-    },
-  }[color];
+    low:
+      "border-emerald-500/20 bg-emerald-500/5 text-emerald-300",
+  };
 
   return (
-    <div className={`
-      p-4
-      rounded-xl
-      bg-[#070b1e]
-      border
-      ${classes.border}
-    `}>
+    <div
+      className={`rounded-xl border p-4 ${classes[tone]}`}
+    >
 
-      <div className="
-        text-[10px]
-        uppercase
-        text-slate-500
-        font-bold
-      ">
+      <div className="text-[9px] font-black uppercase tracking-wider opacity-70">
         {label}
       </div>
 
-      <div className={`
-        text-3xl
-        font-black
-        font-mono
-        mt-1
-        ${classes.value}
-      `}>
-        {value}
+      <div className="mt-2 text-2xl font-black text-white">
+        {count}
       </div>
 
     </div>
@@ -1774,69 +1756,51 @@ function PriorityCard({
 }
 
 /* ============================================================
-   STATUS ROW
-   ============================================================ */
+   HEALTH ITEM
+============================================================ */
 
-function StatusRow({
+function HealthItem({
+  icon,
   label,
   value,
-  active,
+  ok,
 }: {
+  icon: React.ReactNode;
   label: string;
   value: string;
-  active: boolean;
+  ok: boolean;
 }) {
   return (
-    <div className="
-      flex
-      items-center
-      justify-between
-      gap-4
-      p-3
-      rounded-xl
-      bg-[#070b1e]
-      border
-      border-[#1b2554]
-    ">
+    <div className="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-950/30 px-3 py-3">
 
-      <div className="
-        flex
-        items-center
-        gap-2
-      ">
+      <div className="flex min-w-0 items-center gap-3">
 
-        <span className={`
-          w-2
-          h-2
-          rounded-full
-          ${
-            active
-              ? 'bg-emerald-400'
-              : 'bg-slate-600'
-          }
-        `} />
+        <div
+          className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
+            ok
+              ? "bg-emerald-500/10 text-emerald-400"
+              : "bg-red-500/10 text-red-400"
+          }`}
+        >
+          {icon}
+        </div>
 
-        <span className="
-          text-xs
-          text-slate-400
-        ">
+        <span className="truncate text-[10px] font-bold uppercase tracking-wider text-slate-400">
           {label}
         </span>
 
       </div>
 
-      <span className="
-        text-xs
-        text-cyan-300
-        font-mono
-        font-semibold
-        text-right
-      ">
+      <span
+        className={`ml-3 shrink-0 text-[9px] font-black uppercase tracking-wider ${
+          ok
+            ? "text-emerald-400"
+            : "text-red-400"
+        }`}
+      >
         {value}
       </span>
 
     </div>
   );
 }
-
-export default AnalyticsPage;

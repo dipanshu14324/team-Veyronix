@@ -1,3 +1,4 @@
+
 import { useEffect, useState } from 'react';
 
 import {
@@ -35,13 +36,9 @@ const API_FETCH_LIMIT = 500;
 const DASHBOARD_EVENT_COUNT = 100;
 
 /* =========================================================
-   DATA-DRIVEN REPRESENTATIVE EVENT SELECTION
+   STABLE EVENT HASH
    ========================================================= */
 
-/**
- * Stable hash so the same event ordering does not depend on
- * Math.random() and does not change on every render.
- */
 function stableEventHash(
   eventId: string | number,
 ): number {
@@ -55,6 +52,7 @@ function stableEventHash(
     index += 1
   ) {
     hash ^= value.charCodeAt(index);
+
     hash = Math.imul(
       hash,
       16777619,
@@ -64,15 +62,112 @@ function stableEventHash(
   return hash >>> 0;
 }
 
+/* =========================================================
+   BACKEND PRIORITY NORMALIZATION
+   ========================================================= */
+
 /**
- * Select a representative dashboard sample from the real API pool.
- *
  * IMPORTANT:
- * - No hard-coded 25/25/25/25 split.
- * - Source proportions come from the fetched data.
- * - Events are first deterministically mixed inside each source group.
- * - If a source is absent from the API pool, no fake event is created.
+ *
+ * Event severity must come from backend priority.
+ *
+ * ML confidence is SOURCE ATTRIBUTION confidence.
+ * It must never be used as event severity.
  */
+
+type NormalizedPriority =
+  | 'CRITICAL'
+  | 'HIGH'
+  | 'MEDIUM'
+  | 'LOW';
+
+function getBackendPriority(
+  event: ThermalEvent,
+): NormalizedPriority {
+  const rawPriority =
+    String(
+      (event as any).priority ??
+        (event as any).investigationPriority ??
+        '',
+    )
+      .trim()
+      .toUpperCase();
+
+  if (
+    rawPriority === 'CRITICAL'
+  ) {
+    return 'CRITICAL';
+  }
+
+  if (
+    rawPriority === 'HIGH' ||
+    rawPriority === 'HIGH PRIORITY'
+  ) {
+    return 'HIGH';
+  }
+
+  if (
+    rawPriority === 'MEDIUM'
+  ) {
+    return 'MEDIUM';
+  }
+
+  if (
+    rawPriority === 'LOW' ||
+    rawPriority === 'CONTROLLED' ||
+    rawPriority === 'LOW / CONTROLLED'
+  ) {
+    return 'LOW';
+  }
+
+  /*
+   * Fallback to backend priority score.
+   *
+   * This is still backend-derived severity,
+   * NOT ML confidence.
+   */
+
+  const score = Number(
+    (event as any).priorityScore ??
+      (event as any).priority_score,
+  );
+
+  if (Number.isFinite(score)) {
+    if (score >= 85) {
+      return 'CRITICAL';
+    }
+
+    if (score >= 70) {
+      return 'HIGH';
+    }
+
+    if (score >= 50) {
+      return 'MEDIUM';
+    }
+
+    return 'LOW';
+  }
+
+  return 'LOW';
+}
+
+/* =========================================================
+   REPRESENTATIVE EVENT SELECTION
+   ========================================================= */
+
+/**
+ * Select representative events from the API response.
+ *
+ * This function ONLY chooses which events are displayed.
+ *
+ * It NEVER changes:
+ * - priority
+ * - priorityScore
+ * - investigationPriority
+ * - confidence
+ * - source probabilities
+ */
+
 function selectRepresentativeEvents(
   sourceEvents: ThermalEvent[],
   targetCount = DASHBOARD_EVENT_COUNT,
@@ -124,6 +219,7 @@ function selectRepresentativeEvents(
     ).map(
       ([source, group]) => ({
         source,
+
         events: [
           ...group,
         ].sort(
@@ -135,6 +231,7 @@ function selectRepresentativeEvents(
               b.id,
             ),
         ),
+
         count:
           group.length,
       }),
@@ -143,9 +240,6 @@ function selectRepresentativeEvents(
   const total =
     sourceEvents.length;
 
-  /*
-   * Largest-remainder allocation.
-   */
   const allocations =
     groupEntries.map(
       (entry) => {
@@ -154,18 +248,17 @@ function selectRepresentativeEvents(
             total) *
           targetCount;
 
+        const take =
+          Math.floor(
+            exact,
+          );
+
         return {
           ...entry,
           exact,
-          take:
-            Math.floor(
-              exact,
-            ),
+          take,
           remainder:
-            exact -
-            Math.floor(
-              exact,
-            ),
+            exact - take,
         };
       },
     );
@@ -210,13 +303,11 @@ function selectRepresentativeEvents(
       break;
     }
 
-    candidates[0].take +=
-      1;
+    candidates[0].take += 1;
 
     allocated += 1;
 
-    candidates[0].remainder =
-      0;
+    candidates[0].remainder = 0;
   }
 
   const selected: ThermalEvent[] =
@@ -234,9 +325,6 @@ function selectRepresentativeEvents(
     );
   }
 
-  /*
-   * Final deterministic mix.
-   */
   return selected.sort(
     (a, b) =>
       stableEventHash(a.id) -
@@ -245,7 +333,7 @@ function selectRepresentativeEvents(
 }
 
 /* =========================================================
-   LIVE ML RESPONSE
+   ML RESPONSE
    ========================================================= */
 
 interface MLPredictionResponse {
@@ -274,6 +362,10 @@ interface MLPredictionResponse {
   model_available?: boolean;
 }
 
+/* =========================================================
+   SAFE NUMBER
+   ========================================================= */
+
 function safeNumber(
   value: unknown,
   fallback = 0,
@@ -288,9 +380,28 @@ function safeNumber(
     : fallback;
 }
 
+/* =========================================================
+   APPLY ML PREDICTION
+   ========================================================= */
+
 /**
- * The production LightGBM response is the source of truth.
+ * IMPORTANT ARCHITECTURE
+ *
+ * Backend:
+ *   priority / priorityScore
+ *       =
+ *   EVENT SEVERITY
+ *
+ * LightGBM:
+ *   predicted_source
+ *   confidence
+ *   probabilities
+ *       =
+ *   SOURCE ATTRIBUTION
+ *
+ * Therefore ML prediction NEVER changes event severity.
  */
+
 function applyMLPrediction(
   event: ThermalEvent,
   prediction: MLPredictionResponse,
@@ -346,43 +457,19 @@ function applyMLPrediction(
       0,
     );
 
-  const priorityScore =
-    Math.round(
-      confidence * 100,
-    );
+  /*
+   * DO NOT calculate severity here.
+   */
 
-  let investigationPriority:
-    ThermalEvent['investigationPriority'];
-
-  if (
-    confidence >=
-    0.85
-  ) {
-    investigationPriority =
-      'CRITICAL';
-  } else if (
-    confidence >=
-    0.70
-  ) {
-    investigationPriority =
-      'HIGH';
-  } else if (
-    confidence >=
-    0.50
-  ) {
-    investigationPriority =
-      'MEDIUM';
-  } else {
-    investigationPriority =
-      'LOW';
-  }
+  const backendPriority =
+    getBackendPriority(event);
 
   return {
     ...event,
 
     /*
      * =====================================================
-     * LIVE ML RESULT = SOURCE OF TRUTH
+     * LIVE LIGHTGBM ATTRIBUTION
      * =====================================================
      */
 
@@ -391,14 +478,6 @@ function applyMLPrediction(
 
     confidence,
 
-    priorityScore,
-
-    investigationPriority,
-
-    insufficientEvidence:
-      predictedSource ===
-      'Uncertain',
-
     sourceProbabilities: {
       industrial,
       agricultural,
@@ -406,17 +485,49 @@ function applyMLPrediction(
       other,
     },
 
+    insufficientEvidence:
+      predictedSource ===
+      'Uncertain',
+
     message:
       predictedSource ===
       'Uncertain'
         ? 'Evidence insufficient for reliable attribution.'
         : `VEYRONIX LightGBM predicts ${predictedSource}.`,
+
+    /*
+     * =====================================================
+     * BACKEND SEVERITY — PRESERVED
+     * =====================================================
+     *
+     * Explicitly preserve the original backend values.
+     */
+
+    priorityScore:
+      event.priorityScore,
+
+    investigationPriority:
+      event.investigationPriority,
+
+    /*
+     * If the event did not contain a readable
+     * investigation priority, use the normalized
+     * backend priority only as fallback.
+     */
+
+    ...(event.investigationPriority
+      ? {}
+      : {
+          investigationPriority:
+            backendPriority,
+        }),
   };
 }
 
-/**
- * Run the real production prediction for the selected event.
- */
+/* =========================================================
+   RUN LIVE ML
+   ========================================================= */
+
 async function enrichEventWithML(
   event: ThermalEvent,
 ): Promise<ThermalEvent> {
@@ -444,6 +555,19 @@ function App() {
       'dashboard',
     );
 
+  /*
+   * =======================================================
+   * ALL EVENTS
+   * =======================================================
+   *
+   * IMPORTANT:
+   *
+   * This is the backend event collection.
+   *
+   * It is NOT modified when an existing hotspot
+   * is clicked for ML analysis.
+   */
+
   const [
     events,
     setEvents,
@@ -451,6 +575,16 @@ function App() {
     useState<ThermalEvent[]>(
       [],
     );
+
+  /*
+   * =======================================================
+   * SELECTED EVENT
+   * =======================================================
+   *
+   * Completely separate from `events`.
+   *
+   * Live ML updates ONLY this object.
+   */
 
   const [
     selectedEvent,
@@ -509,26 +643,11 @@ function App() {
   ] =
     useState(true);
 
-  /*
-   * =========================================================
-   * EVENT REQUIRED MODAL
-   * =========================================================
-   *
-   * This modal is shown when the user tries to open
-   * Live Monitor or Event Analysis without selecting
-   * a thermal event first.
-   */
-
   const [
     eventRequiredModalOpen,
     setEventRequiredModalOpen,
   ] =
     useState(false);
-
-  /*
-   * Keeps track of which page the user tried to open.
-   * This is only used for the message inside the modal.
-   */
 
   const [
     requestedProtectedPage,
@@ -538,10 +657,6 @@ function App() {
       'live-monitor' | 'analysis' | null
     >(null);
 
-  /*
-   * IMPORTANT:
-   * This means the API successfully returned real events.
-   */
   const [
     backendOnline,
     setBackendOnline,
@@ -570,9 +685,6 @@ function App() {
 
           setError(null);
 
-          /*
-           * Load real event stream.
-           */
           const fetchedEvents =
             await fetchVeyronixEvents(
               API_FETCH_LIMIT,
@@ -583,35 +695,42 @@ function App() {
           }
 
           /*
-           * Select representative dashboard sample.
+           * Select representative events.
+           *
+           * IMPORTANT:
+           * No priority changes happen here.
            */
+
           const representativeEvents =
             selectRepresentativeEvents(
               fetchedEvents,
               DASHBOARD_EVENT_COUNT,
             );
 
+          /*
+           * Store backend events exactly as received.
+           */
+
           setEvents(
             representativeEvents,
           );
 
-          /*
-           * Backend is working.
-           */
           setBackendOnline(
             true,
           );
 
           /*
-           * No event selected initially.
+           * No hotspot selected initially.
            */
+
           setSelectedEvent(
             null,
           );
 
           /*
-           * Health is informational.
+           * Health check is informational.
            */
+
           try {
             const health =
               await checkVeyronixHealth();
@@ -626,8 +745,7 @@ function App() {
             }
           } catch {
             /*
-             * Event API already succeeded,
-             * so keep API online.
+             * Events endpoint already worked.
              */
           }
         } catch (err) {
@@ -670,12 +788,8 @@ function App() {
   const handleNavigate =
     (page: AppPage) => {
       /*
-       * =====================================================
-       * EVENT REQUIRED PROTECTION
-       * =====================================================
-       *
-       * Live Monitor and Event Analysis require a selected
-       * thermal event.
+       * Live Monitor and Analysis require
+       * a selected event.
        */
 
       if (
@@ -702,10 +816,6 @@ function App() {
         return;
       }
 
-      /*
-       * Normal navigation.
-       */
-
       setCurrentPage(
         page,
       );
@@ -715,10 +825,11 @@ function App() {
       );
 
       /*
-       * When returning to Dashboard,
-       * clear the selected event so the user can
-       * intentionally choose a fresh event.
+       * Dashboard clears selection only.
+       *
+       * It does NOT modify event data.
        */
+
       if (
         page ===
         'dashboard'
@@ -735,7 +846,7 @@ function App() {
     };
 
   /* =======================================================
-     CLOSE EVENT REQUIRED MODAL
+     CLOSE EVENT MODAL
      ======================================================= */
 
   const handleCloseEventRequiredModal =
@@ -755,10 +866,6 @@ function App() {
 
   const handleReturnToDashboard =
     () => {
-      /*
-       * Close popup.
-       */
-
       setEventRequiredModalOpen(
         false,
       );
@@ -767,17 +874,9 @@ function App() {
         null,
       );
 
-      /*
-       * Clear current event.
-       */
-
       setSelectedEvent(
         null,
       );
-
-      /*
-       * Go to Dashboard.
-       */
 
       setCurrentPage(
         'dashboard',
@@ -793,6 +892,10 @@ function App() {
       });
     };
 
+  /* =======================================================
+     LOGIN
+     ======================================================= */
+
   const handleLogin = () => {
     setCurrentPage(
       'dashboard',
@@ -803,6 +906,10 @@ function App() {
     );
   };
 
+  /* =======================================================
+     LOGOUT
+     ======================================================= */
+
   const handleLogout = () => {
     setCurrentPage(
       'login',
@@ -811,10 +918,18 @@ function App() {
     setMobileSidebarOpen(
       false,
     );
+
+    /*
+     * Selection is cleared on logout.
+     */
+
+    setSelectedEvent(
+      null,
+    );
   };
 
   /* =======================================================
-     SELECT EVENT + LIVE ML
+     SELECT EVENT
      ======================================================= */
 
   const handleSelectEvent =
@@ -822,7 +937,13 @@ function App() {
       event: ThermalEvent,
     ) => {
       /*
-       * Show immediately while prediction runs.
+       * ===================================================
+       * STEP 1
+       * ===================================================
+       *
+       * Immediately show clicked hotspot.
+       *
+       * The original event object is not changed.
        */
 
       setSelectedEvent(
@@ -832,26 +953,31 @@ function App() {
       setError(null);
 
       try {
+        /*
+         * =================================================
+         * STEP 2
+         * =================================================
+         *
+         * Run LightGBM ONLY for clicked event.
+         */
+
         const updatedEvent =
           await enrichEventWithML(
             event,
           );
 
+        /*
+         * =================================================
+         * STEP 3
+         * =================================================
+         *
+         * Update ONLY selectedEvent.
+         *
+         * NEVER update `events` for an existing event.
+         */
+
         setSelectedEvent(
           updatedEvent,
-        );
-
-        setEvents(
-          previousEvents =>
-            previousEvents.map(
-              previousEvent =>
-                String(
-                  previousEvent.id,
-                ) ===
-                String(event.id)
-                  ? updatedEvent
-                  : previousEvent,
-            ),
         );
       } catch (err) {
         console.error(
@@ -860,7 +986,7 @@ function App() {
         );
 
         /*
-         * Keep real event visible if prediction fails.
+         * Keep clicked event visible.
          */
 
         setSelectedEvent(
@@ -876,7 +1002,7 @@ function App() {
     };
 
   /* =======================================================
-     FETCH ANY EVENT FROM FULL CORPUS
+     FETCH EVENT BY ID
      ======================================================= */
 
   const handleFetchEventById =
@@ -897,7 +1023,9 @@ function App() {
       setError(null);
 
       /*
-       * First check events already loaded.
+       * ===================================================
+       * EVENT ALREADY IN CURRENT COLLECTION
+       * ===================================================
        */
 
       const existingEvent =
@@ -910,23 +1038,22 @@ function App() {
         );
 
       if (existingEvent) {
+        /*
+         * Run ML only for selected event.
+         */
+
         const updatedEvent =
           await enrichEventWithML(
             existingEvent,
           );
 
-        setEvents(
-          previousEvents =>
-            previousEvents.map(
-              previousEvent =>
-                String(
-                  previousEvent.id,
-                ) ===
-                cleanEventId
-                  ? updatedEvent
-                  : previousEvent,
-            ),
-        );
+        /*
+         * IMPORTANT:
+         *
+         * DO NOT modify events.
+         *
+         * Backend severity remains untouched.
+         */
 
         setSelectedEvent(
           updatedEvent,
@@ -936,7 +1063,9 @@ function App() {
       }
 
       /*
-       * Event is outside initial 100.
+       * ===================================================
+       * EVENT OUTSIDE CURRENT COLLECTION
+       * ===================================================
        */
 
       const fetchedEvent =
@@ -945,13 +1074,20 @@ function App() {
         );
 
       /*
-       * Production LightGBM prediction.
+       * Run LightGBM.
        */
 
       const updatedEvent =
         await enrichEventWithML(
           fetchedEvent,
         );
+
+      /*
+       * This event genuinely did not exist
+       * in current collection.
+       *
+       * Therefore adding it is valid.
+       */
 
       setEvents(
         previousEvents => {
@@ -969,17 +1105,7 @@ function App() {
           if (
             alreadyExists
           ) {
-            return previousEvents.map(
-              previousEvent =>
-                String(
-                  previousEvent.id,
-                ) ===
-                String(
-                  updatedEvent.id,
-                )
-                  ? updatedEvent
-                  : previousEvent,
-            );
+            return previousEvents;
           }
 
           return [
@@ -1126,6 +1252,10 @@ function App() {
       });
     };
 
+  /* =======================================================
+     UPDATE INVESTIGATION STATUS
+     ======================================================= */
+
   const handleUpdateCaseStatus =
     (
       caseId: string,
@@ -1146,6 +1276,10 @@ function App() {
           ),
       );
     };
+
+  /* =======================================================
+     ADD INVESTIGATION NOTE
+     ======================================================= */
 
   const handleAddCaseNote =
     (
@@ -1275,7 +1409,7 @@ function App() {
   }
 
   /* =======================================================
-     COMPLETE INITIAL FAILURE
+     INITIAL API FAILURE
      ======================================================= */
 
   if (
@@ -1319,15 +1453,15 @@ function App() {
   }
 
   /* =======================================================
-     MAIN APPLICATION LAYOUT
+     MAIN APPLICATION
      ======================================================= */
 
   return (
     <div className="min-h-screen bg-[#060814] text-[#e2e8f0] flex font-sans-clean antialiased selection:bg-cyan-500/30 selection:text-cyan-200">
 
-      {/* =====================================================
+      {/* ===================================================
           DESKTOP SIDEBAR
-      ===================================================== */}
+      =================================================== */}
 
       <div className="hidden md:flex h-screen sticky top-0 transition-all duration-300">
 
@@ -1372,9 +1506,9 @@ function App() {
 
       </div>
 
-      {/* =====================================================
+      {/* ===================================================
           MOBILE SIDEBAR
-      ===================================================== */}
+      =================================================== */}
 
       {mobileSidebarOpen && (
         <div className="fixed inset-0 z-50 md:hidden flex">
@@ -1437,9 +1571,9 @@ function App() {
         </div>
       )}
 
-      {/* =====================================================
+      {/* ===================================================
           MAIN CONTENT
-      ===================================================== */}
+      =================================================== */}
 
       <div className="flex-1 flex flex-col min-w-0">
 
@@ -1680,10 +1814,6 @@ function App() {
             }
           >
 
-            {/* ============================================
-                HEADER
-            ============================================ */}
-
             <div className="flex items-start justify-between gap-4">
 
               <div className="flex items-center gap-3">
@@ -1756,10 +1886,6 @@ function App() {
 
             </div>
 
-            {/* ============================================
-                MESSAGE
-            ============================================ */}
-
             <div className="mt-5">
 
               <p
@@ -1796,10 +1922,6 @@ function App() {
               </p>
 
             </div>
-
-            {/* ============================================
-                ACTIONS
-            ============================================ */}
 
             <div className="mt-6 flex items-center justify-end gap-3">
 
@@ -1902,3 +2024,4 @@ function App() {
 }
 
 export default App;
+
