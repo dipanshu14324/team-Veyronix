@@ -453,10 +453,6 @@ export const InvestigationPage: React.FC<
     Record<string, InvestigationNote[]>
   >({});
 
-  // ==========================================================
-  // DIRECT BACKEND EVENT STATE
-  // ==========================================================
-
   const [backendEvents, setBackendEvents] = useState<
     ExtendedThermalEvent[]
   >([]);
@@ -476,10 +472,6 @@ export const InvestigationPage: React.FC<
   const [analysisError, setAnalysisError] =
     useState<string | null>(null);
 
-  // ==========================================================
-  // LOAD REAL EVENTS FROM FASTAPI
-  // ==========================================================
-
   const loadBackendEvents = async () => {
     setEventsLoading(true);
     setEventsError(null);
@@ -497,7 +489,8 @@ export const InvestigationPage: React.FC<
 
       const json = await response.json();
 
-      const rawEvents = toArray<Record<string, any>>(json);
+      const rawEvents =
+        toArray<Record<string, any>>(json);
 
       const normalized = rawEvents
         .map(normalizeBackendEvent)
@@ -528,10 +521,6 @@ export const InvestigationPage: React.FC<
   useEffect(() => {
     void loadBackendEvents();
   }, []);
-
-  // ==========================================================
-  // MERGE PROP EVENTS + BACKEND EVENTS
-  // ==========================================================
 
   const safeCases = useMemo(
     () => toArray<InvestigationCase>(cases),
@@ -583,17 +572,9 @@ export const InvestigationPage: React.FC<
     return map;
   }, [safeEvents]);
 
-  // ==========================================================
-  // CASES
-  // ==========================================================
-
   const displayCases = useMemo<DisplayCase[]>(() => {
     const result: DisplayCase[] = [];
     const usedEventIds = new Set<string>();
-
-    // --------------------------------------------------------
-    // Existing investigation dockets
-    // --------------------------------------------------------
 
     safeCases.forEach((currentCase) => {
       const event = eventById.get(
@@ -608,7 +589,6 @@ export const InvestigationPage: React.FC<
 
       result.push({
         caseId: String(currentCase.caseId),
-
         eventId: String(currentCase.eventId),
 
         eventName:
@@ -646,11 +626,6 @@ export const InvestigationPage: React.FC<
       });
     });
 
-    // --------------------------------------------------------
-    // Automatically create investigation cases
-    // from REAL backend events
-    // --------------------------------------------------------
-
     const ranked = Array.from(
       eventById.values(),
     )
@@ -663,9 +638,6 @@ export const InvestigationPage: React.FC<
     let candidates =
       ranked.filter(isEscalated);
 
-    // If backend event records do not yet contain the
-    // detailed ML priority fields, show top events instead
-    // of showing a blank Investigation page.
     if (candidates.length === 0) {
       candidates = ranked.slice(
         0,
@@ -684,10 +656,6 @@ export const InvestigationPage: React.FC<
         const priority: PriorityLevel =
           event.investigationPriority ??
           'MEDIUM';
-
-        const source =
-          event.likelySource ??
-          'Awaiting ML analysis';
 
         const triageText =
           `VEYRONIX thermal event detected at ` +
@@ -759,10 +727,6 @@ export const InvestigationPage: React.FC<
     [displayCases],
   );
 
-  // ==========================================================
-  // SELECTION
-  // ==========================================================
-
   useEffect(() => {
     if (
       selectedCaseId &&
@@ -806,10 +770,6 @@ export const InvestigationPage: React.FC<
     ],
   );
 
-  // ==========================================================
-  // ACTIVE EVENT
-  // ==========================================================
-
   const activeEvent = useMemo<
     ExtendedThermalEvent | undefined
   >(() => {
@@ -822,17 +782,11 @@ export const InvestigationPage: React.FC<
     );
   }, [eventById, activeCase]);
 
-  // ==========================================================
-  // REAL ML ANALYSIS
-  // ==========================================================
-
   useEffect(() => {
     let cancelled = false;
 
     const loadAnalysis = async () => {
-      if (
-        !activeEvent?.id
-      ) {
+      if (!activeEvent?.id) {
         setAnalysis(null);
         setAnalysisError(null);
         setAnalysisLoading(false);
@@ -881,16 +835,8 @@ export const InvestigationPage: React.FC<
     };
   }, [activeEvent?.id]);
 
-  // ==========================================================
-  // CASE NOTES
-  // ==========================================================
-
   const caseNotes =
     activeCase?.notes ?? [];
-
-  // ==========================================================
-  // REAL ML PROBABILITIES
-  // ==========================================================
 
   const probabilities = useMemo(() => {
     if (!analysis) {
@@ -902,10 +848,6 @@ export const InvestigationPage: React.FC<
       {}
     );
   }, [analysis]);
-
-  // ==========================================================
-  // REAL ML EVIDENCE
-  // ==========================================================
 
   const evidenceList = useMemo<
     string[]
@@ -923,10 +865,6 @@ export const InvestigationPage: React.FC<
       (item) => String(item),
     );
   }, [analysis]);
-
-  // ==========================================================
-  // REAL ML VALUES
-  // ==========================================================
 
   const liveSource =
     analysis?.source ??
@@ -949,10 +887,6 @@ export const InvestigationPage: React.FC<
     analysis?.insufficient_evidence ??
     false;
 
-  // ==========================================================
-  // ACTION FEEDBACK
-  // ==========================================================
-
   useEffect(() => {
     if (!actionFeedback) {
       return;
@@ -967,10 +901,6 @@ export const InvestigationPage: React.FC<
       window.clearTimeout(timer);
     };
   }, [actionFeedback]);
-
-  // ==========================================================
-  // ACTION
-  // ==========================================================
 
   const handleAction = (
     status: InvestigationCase['status'],
@@ -999,10 +929,6 @@ export const InvestigationPage: React.FC<
 
     setActionFeedback(label);
   };
-
-  // ==========================================================
-  // ADD NOTE
-  // ==========================================================
 
   const handleAddNoteSubmit = (
     event: React.FormEvent<HTMLFormElement>,
@@ -1057,10 +983,6 @@ export const InvestigationPage: React.FC<
     );
   };
 
-  // ==========================================================
-  // OPEN MAP
-  // ==========================================================
-
   const openMap = () => {
     if (!activeEvent) {
       return;
@@ -1091,17 +1013,9 @@ export const InvestigationPage: React.FC<
     );
   };
 
-  // ==========================================================
-  // REFRESH EVENTS
-  // ==========================================================
-
   const refreshEvents = () => {
     void loadBackendEvents();
   };
-
-  // ==========================================================
-  // RENDER
-  // ==========================================================
 
   return (
     <div className="space-y-6 select-text">
@@ -1244,12 +1158,30 @@ export const InvestigationPage: React.FC<
 
       ) : (
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+        /*
+         * IMPORTANT:
+         * Fixed 12-column layout.
+         *
+         * This intentionally DOES NOT use:
+         * grid-cols-1
+         * md:grid-cols-12
+         * lg:grid-cols-12
+         * xl:grid-cols-12
+         *
+         * Therefore the two main panels stay side-by-side
+         * on desktop, laptop, tablet and mobile.
+         *
+         * LEFT  = 4 columns
+         * RIGHT = 8 columns
+         */
+
+        <div className="grid grid-cols-12 gap-5 min-w-[720px]">
+
           {/* ================================================== */}
           {/* CASE LIST */}
           {/* ================================================== */}
 
-          <div className="lg:col-span-4 space-y-3">
+          <div className="col-span-4 space-y-3">
 
             <TypewriterHeading
               as="h2"
@@ -1390,7 +1322,7 @@ export const InvestigationPage: React.FC<
           {/* ACTIVE CASE */}
           {/* ================================================== */}
 
-         <div className="lg:col-span-8 bg-[#080d25]/95 border border-[#1e2a60] rounded-2xl p-4 sm:p-5 shadow-2xl space-y-5">
+          <div className="col-span-8 bg-[#080d25]/95 border border-[#1e2a60] rounded-2xl p-4 sm:p-5 shadow-2xl space-y-5">
 
             <div className="pb-4 border-b border-[#1b2554]">
 
