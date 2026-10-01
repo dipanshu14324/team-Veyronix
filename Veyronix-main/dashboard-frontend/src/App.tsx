@@ -1,6 +1,5 @@
 
-import { useEffect, useState } from 'react';
-
+import { lazy, Suspense, useEffect, useState } from 'react';
 import {
   fetchVeyronixEvents,
   fetchVeyronixEventById,
@@ -12,15 +11,53 @@ import { Sidebar } from './components/Sidebar';
 import { TopNavbar } from './components/TopNavbar';
 import { ApiConfigModal } from './components/ApiConfigModal';
 
-import { LoginPage } from './components/pages/LoginPage';
-import { DashboardPage } from './components/pages/DashboardPage';
-import { LiveMonitorPage } from './components/pages/LiveMonitorPage';
-import { ThermalEventsPage } from './components/pages/ThermalEventsPage';
-import { EventAnalysisPage } from './components/pages/EventAnalysisPage';
-import { InvestigationPage } from './components/pages/InvestigationPage';
-import { AnalyticsPage } from './components/pages/AnalyticsPage';
+const LoginPage = lazy(() =>
+  import('./components/pages/LoginPage').then(m => ({
+    default: m.LoginPage,
+  }))
+);
 
-import { SystemArchitecturePage } from './components/pages/SystemArchitecturePage';
+const DashboardPage = lazy(() =>
+  import('./components/pages/DashboardPage').then(m => ({
+    default: m.DashboardPage,
+  }))
+);
+
+const LiveMonitorPage = lazy(() =>
+  import('./components/pages/LiveMonitorPage').then(m => ({
+    default: m.LiveMonitorPage,
+  }))
+);
+
+const ThermalEventsPage = lazy(() =>
+  import('./components/pages/ThermalEventsPage').then(m => ({
+    default: m.ThermalEventsPage,
+  }))
+);
+
+const EventAnalysisPage = lazy(() =>
+  import('./components/pages/EventAnalysisPage').then(m => ({
+    default: m.EventAnalysisPage,
+  }))
+);
+
+const InvestigationPage = lazy(() =>
+  import('./components/pages/InvestigationPage').then(m => ({
+    default: m.InvestigationPage,
+  }))
+);
+
+const AnalyticsPage = lazy(() =>
+  import('./components/pages/AnalyticsPage').then(m => ({
+    default: m.AnalyticsPage,
+  }))
+);
+
+const SystemArchitecturePage = lazy(() =>
+  import('./components/pages/SystemArchitecturePage').then(m => ({
+    default: m.SystemArchitecturePage,
+  }))
+);
 
 import {
   INITIAL_INVESTIGATION_CASES,
@@ -1373,19 +1410,27 @@ function App() {
      LOGIN
      ======================================================= */
 
-  if (
-    currentPage ===
-    'login'
-  ) {
-    return (
-      <LoginPage
-        onLogin={
-          handleLogin
-        }
-      />
-    );
-  }
+ if (currentPage === 'login') {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-background flex items-center justify-center">
+          <div className="text-center">
+            <div className="text-2xl font-bold text-white mb-2">
+              VEYRONIX AI
+            </div>
 
+            <div className="text-sm text-slate-400">
+              Loading login...
+            </div>
+          </div>
+        </div>
+      }
+    >
+      <LoginPage onLogin={handleLogin} />
+    </Suspense>
+  );
+}
   /* =======================================================
      LOADING
      ======================================================= */
@@ -1625,155 +1670,101 @@ function App() {
 
         <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto">
 
-          {/* =================================================
-              DASHBOARD
-          ================================================= */}
+  <Suspense
+    fallback={
+      <div className="min-h-[60vh] flex items-center justify-center">
+        <div className="text-center">
+          <div className="text-2xl font-bold text-white mb-2">
+            VEYRONIX AI
+          </div>
 
-          {currentPage ===
-            'dashboard' && (
-            <DashboardPage
-              events={
-                filteredEvents
-              }
+          <div className="text-sm text-slate-400">
+            Loading module...
+          </div>
+        </div>
+      </div>
+    }
+  >
 
-              selectedEvent={
-                selectedEvent
-              }
+    {/* =================================================
+        DASHBOARD
+    ================================================= */}
+    {currentPage === 'dashboard' && (
+      <DashboardPage
+        events={filteredEvents}
+        selectedEvent={selectedEvent}
+        onSelectEvent={handleSelectEvent}
+        onNavigate={handleNavigate}
+        onViewEventDetails={handleViewEventDetails}
+      />
+    )}
 
-              onSelectEvent={
-                handleSelectEvent
-              }
+    {/* =================================================
+        LIVE MONITOR
+    ================================================= */}
+    {currentPage === 'live-monitor' && (
+      <LiveMonitorPage
+        events={filteredEvents}
+        selectedEvent={selectedEvent}
+        onSelectEvent={handleSelectEvent}
+        onAnalyzeEvent={handleViewEventDetails}
+      />
+    )}
 
-              onNavigate={
-                handleNavigate
-              }
+    {/* =================================================
+        THERMAL EVENTS
+    ================================================= */}
+    {currentPage === 'events' && (
+      <ThermalEventsPage
+        events={filteredEvents}
+        onViewEvent={handleViewEventDetails}
+      />
+    )}
 
-              onViewEventDetails={
-                handleViewEventDetails
-              }
-            />
-          )}
+    {/* =================================================
+        EVENT ANALYSIS
+    ================================================= */}
+    {currentPage === 'analysis' && selectedEvent && (
+      <EventAnalysisPage
+        event={selectedEvent}
+        events={events}
+        onSelectEvent={handleSelectEvent}
+        onCreateInvestigation={handleCreateInvestigation}
+      />
+    )}
 
-          {/* =================================================
-              LIVE MONITOR
-          ================================================= */}
+    {/* =================================================
+        INVESTIGATION
+    ================================================= */}
+    {currentPage === 'investigation' && (
+      <InvestigationPage
+        cases={cases}
+        selectedCaseId={selectedCaseId}
+        onSelectCase={setSelectedCaseId}
+        onUpdateCaseStatus={handleUpdateCaseStatus}
+        onAddCaseNote={handleAddCaseNote}
+      />
+    )}
 
-          {currentPage ===
-            'live-monitor' && (
-            <LiveMonitorPage
-              events={
-                filteredEvents
-              }
+    {/* =================================================
+        ANALYTICS
+    ================================================= */}
+    {currentPage === 'analytics' && (
+      <AnalyticsPage
+        events={events}
+      />
+    )}
 
-              selectedEvent={
-                selectedEvent
-              }
+    {/* =================================================
+        SYSTEM
+    ================================================= */}
+    {currentPage === 'system' && (
+      <SystemArchitecturePage />
+    )}
 
-              onSelectEvent={
-                handleSelectEvent
-              }
+  </Suspense>
 
-              onAnalyzeEvent={
-                handleViewEventDetails
-              }
-            />
-          )}
-
-          {/* =================================================
-              THERMAL EVENTS
-          ================================================= */}
-
-          {currentPage ===
-            'events' && (
-            <ThermalEventsPage
-              events={
-                filteredEvents
-              }
-
-              onViewEvent={
-                handleViewEventDetails
-              }
-            />
-          )}
-
-          {/* =================================================
-              EVENT ANALYSIS
-          ================================================= */}
-
-          {currentPage ===
-            'analysis' &&
-            selectedEvent && (
-              <EventAnalysisPage
-                event={
-                  selectedEvent
-                }
-
-                events={
-                  events
-                }
-
-                onSelectEvent={
-                  handleSelectEvent
-                }
-
-                onCreateInvestigation={
-                  handleCreateInvestigation
-                }
-              />
-            )}
-
-          {/* =================================================
-              INVESTIGATION
-          ================================================= */}
-
-          {currentPage ===
-            'investigation' && (
-            <InvestigationPage
-              cases={
-                cases
-              }
-
-              selectedCaseId={
-                selectedCaseId
-              }
-
-              onSelectCase={
-                setSelectedCaseId
-              }
-
-              onUpdateCaseStatus={
-                handleUpdateCaseStatus
-              }
-
-              onAddCaseNote={
-                handleAddCaseNote
-              }
-            />
-          )}
-
-          {/* =================================================
-              ANALYTICS
-          ================================================= */}
-
-          {currentPage ===
-            'analytics' && (
-            <AnalyticsPage
-              events={
-                events
-              }
-            />
-          )}
-
-          {/* =================================================
-              SYSTEM
-          ================================================= */}
-
-          {currentPage ===
-            'system' && (
-            <SystemArchitecturePage />
-          )}
-
-        </main>
+</main>
       </div>
 
       {/* =====================================================
@@ -2024,4 +2015,3 @@ function App() {
 }
 
 export default App;
-
